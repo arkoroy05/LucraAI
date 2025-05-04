@@ -85,9 +85,17 @@ export default function ChatInterface() {
 
       // Attach the parsed data from the header to the message
       if (window.__lastParsedData) {
-        // Modify the message object to include the parsed data
-        message.parsedData = window.__lastParsedData;
-        console.log('Transaction data attached:', window.__lastParsedData);
+        // We need to use a different approach to modify the message object
+        // since it might be read-only in strict mode
+        setTimeout(() => {
+          // Force a re-render with the updated messages
+          // This is a hack, but it works for our purposes
+          document.dispatchEvent(new CustomEvent('message-updated', {
+            detail: { messageId: message.id, parsedData: window.__lastParsedData }
+          }));
+
+          console.log('Transaction data attached:', window.__lastParsedData);
+        }, 0);
 
         // Clear the temporary storage
         window.__lastParsedData = null;
@@ -109,6 +117,74 @@ export default function ChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  // Add event listener for message updates with parsed data
+  useEffect(() => {
+    const handleMessageUpdate = (event) => {
+      const { messageId, parsedData } = event.detail;
+
+      // Find the message in the DOM and update it
+      // This is a workaround since we can't directly modify the messages array
+      const messageElements = document.querySelectorAll(`[data-message-id="${messageId}"]`);
+      if (messageElements.length > 0) {
+        // Store the parsed data as a data attribute
+        messageElements.forEach(el => {
+          el.setAttribute('data-parsed-data', JSON.stringify(parsedData));
+
+          // If this is an assistant message, check if we need to show transaction UI
+          if (el.getAttribute('data-role') === 'assistant') {
+            // Find or create the transaction UI container
+            let transactionUI = el.querySelector('.transaction-ui');
+            if (!transactionUI) {
+              transactionUI = document.createElement('div');
+              transactionUI.className = 'transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10';
+              el.querySelector('.message-content').appendChild(transactionUI);
+            }
+
+            // Update the transaction UI based on the parsed data
+            if (parsedData.intent === 'send' || parsedData.intent === 'split') {
+              transactionUI.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-white/60">
+                    ${parsedData.intent === "send" ? "Transaction" : "Split Payment"}
+                  </span>
+                  <span class="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full">
+                    Pending
+                  </span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-white font-medium">
+                    ${parsedData.amount} ${parsedData.token || "USDC"} to
+                    ${parsedData.recipients && parsedData.recipients.length > 0
+                      ? parsedData.recipients.map(r => `@${r}`).join(", ")
+                      : "recipient"}
+                    ${parsedData.note ? ` ${parsedData.note}` : ""}
+                  </span>
+                  <div>
+                    <button class="text-purple-400 hover:text-purple-300 gap-1 text-sm px-2 py-1 bg-transparent">
+                      View
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block">
+                        <path d="M7 17L17 7"></path>
+                        <path d="M7 7h10v10"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              `;
+            }
+          }
+        });
+      }
+    };
+
+    // Add the event listener
+    document.addEventListener('message-updated', handleMessageUpdate);
+
+    // Clean up
+    return () => {
+      document.removeEventListener('message-updated', handleMessageUpdate);
+    };
+  }, []);
 
   // Generate suggestions based on input
   useEffect(() => {
@@ -397,6 +473,8 @@ export default function ChatInterface() {
                     "flex",
                     message.role === "user" ? "justify-end" : "justify-start"
                   )}
+                  data-message-id={message.id}
+                  data-role={message.role}
                 >
                   <motion.div
                     initial={{ scale: 0.8 }}
@@ -424,7 +502,7 @@ export default function ChatInterface() {
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ type: "spring", damping: 20 }}
                       className={cn(
-                        "rounded-2xl p-5 text-sm leading-relaxed",
+                        "rounded-2xl p-5 text-sm leading-relaxed message-content",
                         message.role === "user"
                           ? "bg-purple-500/30 text-white backdrop-blur-sm"
                           : "bg-white/10 text-white/90 backdrop-blur-sm border border-white/10"
@@ -437,7 +515,7 @@ export default function ChatInterface() {
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.2 }}
-                            className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10"
+                            className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
                           >
                             <div className="flex justify-between items-center mb-2">
                               <span className="text-white/60">
@@ -477,7 +555,7 @@ export default function ChatInterface() {
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: 0.2 }}
-                              className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10"
+                              className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
                             >
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-white/60">Transaction</span>
