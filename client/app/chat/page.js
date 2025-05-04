@@ -35,10 +35,10 @@ function useWindowSize() {
         height: window.innerHeight,
       });
     }
-    
+
     handleResize();
     window.addEventListener('resize', handleResize);
-    
+
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -46,10 +46,63 @@ function useWindowSize() {
 }
 
 export default function ChatInterface() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat()
+  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat({
+    api: '/api/chat',
+    id: 'lucra-chat',
+    initialMessages: [],
+    body: {
+      clientInfo: {
+        clientId: 'lucra-web-client',
+        clientVersion: '1.0.0'
+      }
+    },
+    onResponse: (response) => {
+      // This is called when the API response is received
+      if (response.ok) {
+        console.log('Chat response received');
+
+        // Get the parsed data from the custom header
+        const parsedDataHeader = response.headers.get('X-Parsed-Data');
+        if (parsedDataHeader) {
+          try {
+            const parsedData = JSON.parse(parsedDataHeader);
+            console.log('Parsed data from header:', parsedData);
+
+            // Store the parsed data to be used in the UI
+            // We'll attach it to the last message when it's complete
+            window.__lastParsedData = parsedData;
+          } catch (err) {
+            console.error('Error parsing X-Parsed-Data header:', err);
+          }
+        }
+      } else {
+        console.error('Error in chat response:', response.statusText);
+      }
+    },
+    onFinish: (message) => {
+      // This is called when the API response is complete
+      console.log('Message finished:', message);
+
+      // Attach the parsed data from the header to the message
+      if (window.__lastParsedData) {
+        // Modify the message object to include the parsed data
+        message.parsedData = window.__lastParsedData;
+        console.log('Transaction data attached:', window.__lastParsedData);
+
+        // Clear the temporary storage
+        window.__lastParsedData = null;
+      }
+    },
+    onError: (error) => {
+      console.error('Chat error:', error);
+    },
+    // Use text protocol for compatibility with our API
+    streamProtocol: 'text'
+  })
   const [isRecording, setIsRecording] = useState(false)
   const messagesEndRef = useRef(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [suggestions, setSuggestions] = useState([])
   const { width } = useWindowSize()
   const isMobile = width > 0 && width < 768
 
@@ -57,12 +110,74 @@ export default function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  // Generate suggestions based on input
+  useEffect(() => {
+    if (input.trim().length > 0) {
+      // Simple pattern matching for suggestions
+      const lowerInput = input.toLowerCase();
+      const newSuggestions = [];
+
+      if (lowerInput.includes('send') || lowerInput.includes('transfer')) {
+        newSuggestions.push('Send 10 USDC');
+      }
+
+      if (lowerInput.includes('split')) {
+        newSuggestions.push('Split equally');
+      }
+
+      if (lowerInput.includes('to') && !lowerInput.includes('@')) {
+        newSuggestions.push('to @alice.base');
+      }
+
+      if (lowerInput.includes('check') || lowerInput.includes('balance')) {
+        newSuggestions.push('Check balance');
+      }
+
+      if (lowerInput.includes('history') || lowerInput.includes('transactions')) {
+        newSuggestions.push('Show history');
+      }
+
+      setSuggestions(newSuggestions);
+    } else {
+      setSuggestions([]);
+    }
+  }, [input]);
+
   const toggleRecording = () => {
     setIsRecording(!isRecording)
   }
 
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen)
+  }
+
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion) => {
+    let newInput = input;
+
+    // Add the suggestion to the current input
+    if (input.trim().length > 0) {
+      newInput = `${input} ${suggestion}`;
+    } else {
+      newInput = suggestion;
+    }
+
+    // Update the input field
+    handleInputChange({ target: { value: newInput } });
+  }
+
+  // Custom submit handler to ensure proper form submission
+  const customSubmit = (e) => {
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
+
+    if (input.trim() === '') {
+      return;
+    }
+
+    // Call the handleSubmit function from useChat
+    handleSubmit(e);
   }
 
   return (
@@ -73,7 +188,7 @@ export default function ChatInterface() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/60" />
 
         {/* Grid Pattern */}
-        <div className="absolute inset-0" 
+        <div className="absolute inset-0"
           style={{
             backgroundImage: `
               linear-gradient(to right, rgba(139, 92, 246, 0.1) 1px, transparent 1px),
@@ -83,7 +198,7 @@ export default function ChatInterface() {
             transform: 'perspective(1000px) rotateX(60deg)',
             transformOrigin: 'center center',
             opacity: 0.5
-          }} 
+          }}
         />
 
         {/* Additional purple glow */}
@@ -253,6 +368,12 @@ export default function ChatInterface() {
                       <Button
                         variant="outline"
                         className="w-full py-6 text-sm bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-200"
+                        onClick={() => {
+                          // Set the input value to the action text
+                          setInput(action);
+                          // Submit the form with the action text
+                          customSubmit({ preventDefault: () => {} });
+                        }}
                       >
                         {action}
                       </Button>
@@ -310,37 +431,80 @@ export default function ChatInterface() {
                       )}
                     >
                       {message.content}
-                      {message.role === "assistant" && message.content.includes("transaction") && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.2 }}
-                          className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10"
-                        >
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-white/60">Transaction</span>
-                            <motion.span
-                              animate={{ scale: [1, 1.05, 1] }}
-                              transition={{ repeat: Infinity, duration: 2 }}
-                              className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
-                            >
-                              Pending
-                            </motion.span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-white font-medium">0.1 ETH to Alex</span>
-                            <motion.div whileHover={{ scale: 1.05 }}>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-purple-400 hover:text-purple-300 gap-1"
+                      {message.role === "assistant" && (
+                        message.parsedData && (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2 }}
+                            className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10"
+                          >
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-white/60">
+                                {message.parsedData.intent === "send" ? "Transaction" : "Split Payment"}
+                              </span>
+                              <motion.span
+                                animate={{ scale: [1, 1.05, 1] }}
+                                transition={{ repeat: Infinity, duration: 2 }}
+                                className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
                               >
-                                View
-                                <ArrowUpRight className="h-3 w-3" />
-                              </Button>
+                                Pending
+                              </motion.span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-white font-medium">
+                                {message.parsedData.amount} {message.parsedData.token || "USDC"} to{" "}
+                                {message.parsedData.recipients && message.parsedData.recipients.length > 0
+                                  ? message.parsedData.recipients.map(r => `@${r}`).join(", ")
+                                  : "recipient"}
+                                {message.parsedData.note ? ` ${message.parsedData.note}` : ""}
+                              </span>
+                              <motion.div whileHover={{ scale: 1.05 }}>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-purple-400 hover:text-purple-300 gap-1"
+                                >
+                                  View
+                                  <ArrowUpRight className="h-3 w-3" />
+                                </Button>
+                              </motion.div>
+                            </div>
+                          </motion.div>
+                        ) : (
+                          message.content.includes("transaction") && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.2 }}
+                              className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10"
+                            >
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-white/60">Transaction</span>
+                                <motion.span
+                                  animate={{ scale: [1, 1.05, 1] }}
+                                  transition={{ repeat: Infinity, duration: 2 }}
+                                  className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
+                                >
+                                  Pending
+                                </motion.span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-white font-medium">0.1 ETH to Alex</span>
+                                <motion.div whileHover={{ scale: 1.05 }}>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-purple-400 hover:text-purple-300 gap-1"
+                                  >
+                                    View
+                                    <ArrowUpRight className="h-3 w-3" />
+                                  </Button>
+                                </motion.div>
+                              </div>
                             </motion.div>
-                          </div>
-                        </motion.div>
+                          )
+                        )
                       )}
                     </motion.div>
                   </motion.div>
@@ -358,51 +522,90 @@ export default function ChatInterface() {
             className="sticky bottom-6 mt-6"
           >
             <Card className="backdrop-blur-xl bg-white/10 border-white/20 overflow-hidden">
-              <form onSubmit={handleSubmit} className="flex items-center gap-4 p-4">
-                <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      "rounded-xl h-10 w-10 transition-all duration-300",
-                      isRecording 
-                        ? "text-red-400 bg-red-500/20 hover:bg-red-500/30 ring-4 ring-red-500/20" 
-                        : "text-white/60 hover:text-white hover:bg-white/10"
-                    )}
-                    onClick={toggleRecording}
+              <div className="flex flex-col gap-2">
+                {/* Suggestion chips */}
+                {suggestions.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex flex-wrap gap-2 px-4 pb-2"
                   >
-                    <Mic className="h-5 w-5" />
-                  </Button>
-                </motion.div>
-                
-                <Input
-                  value={input}
-                  onChange={handleInputChange}
-                  placeholder={isRecording ? "Listening..." : "Type a message or speak to send crypto..."}
-                  disabled={isRecording}
-                  className="bg-transparent border-0 focus-visible:ring-0 placeholder:text-white/40 text-white"
-                />
-                
-                <motion.div
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  style={{ opacity: isLoading || input.trim() === "" ? 0.5 : 1 }}
-                >
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      "rounded-xl h-10 w-10 transition-all duration-300",
-                      "text-white/60 hover:text-white hover:bg-white/10"
-                    )}
-                    disabled={isLoading || input.trim() === ""}
+                    {suggestions.map((suggestion, index) => (
+                      <motion.div
+                        key={suggestion}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: index * 0.1 }}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="bg-purple-500/20 border-purple-500/30 text-white hover:bg-purple-500/30 hover:border-purple-500/40"
+                          onClick={() => handleSuggestionClick(suggestion)}
+                        >
+                          {suggestion}
+                        </Button>
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+
+                <form onSubmit={customSubmit} className="flex items-center gap-4 p-4">
+                  <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "rounded-xl h-10 w-10 transition-all duration-300",
+                        isRecording
+                          ? "text-red-400 bg-red-500/20 hover:bg-red-500/30 ring-4 ring-red-500/20"
+                          : "text-white/60 hover:text-white hover:bg-white/10"
+                      )}
+                      onClick={toggleRecording}
+                    >
+                      <Mic className="h-5 w-5" />
+                    </Button>
+                  </motion.div>
+
+                  <Input
+                    value={input}
+                    onChange={handleInputChange}
+                    placeholder={isRecording ? "Listening..." : "Type a message or speak to send crypto..."}
+                    disabled={isRecording}
+                    className="bg-transparent border-0 focus-visible:ring-0 placeholder:text-white/40 text-white"
+                    onKeyDown={(e) => {
+                      // Submit on Enter key press (without Shift key)
+                      if (e.key === 'Enter' && !e.shiftKey && input.trim() !== '') {
+                        e.preventDefault();
+                        customSubmit(e);
+                      }
+                    }}
+                  />
+
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    style={{ opacity: isLoading || input.trim() === "" ? 0.5 : 1 }}
                   >
-                    <Send className="h-5 w-5" />
-                  </Button>
-                </motion.div>
-              </form>
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "rounded-xl h-10 w-10 transition-all duration-300",
+                        "text-white/60 hover:text-white hover:bg-white/10"
+                      )}
+                      disabled={isLoading || input.trim() === ""}
+                    >
+                      <Send className="h-5 w-5" />
+                    </Button>
+                  </motion.div>
+                </form>
+              </div>
             </Card>
           </motion.div>
         </div>
