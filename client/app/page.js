@@ -7,6 +7,7 @@ import { Globe, MessageSquare, Wallet, BarChart3, ChevronRight } from "lucide-re
 import { Button } from "@/components/ui/button"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { motion } from "framer-motion"
+import dynamic from "next/dynamic"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -19,6 +20,13 @@ const slideIn = {
   animate: { x: 0 },
   exit: { x: -300 }
 }
+
+const SplineViewer = dynamic(() => import("@/components/SplineViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="relative h-[700px] w-[120%] -ml-[10%] overflow-hidden bg-white/5 backdrop-blur-lg rounded-xl animate-pulse" />
+  ),
+})
 
 export default function Home() {
   return (
@@ -132,18 +140,9 @@ export default function Home() {
             <div className="md:w-1/2">
               <motion.div 
                 variants={fadeIn}
-                className="relative h-[700px] w-[120%] -ml-[10%] overflow-hidden"
+                className="relative"
               >
-                <Script type="module" src="https://unpkg.com/@splinetool/viewer@1.9.89/build/spline-viewer.js" strategy="afterInteractive" />
-                <div id="spline-container" className="w-full h-full">
-                  {/* @ts-expect-error - Spline viewer is loaded dynamically */}
-                  <spline-viewer 
-                    url="https://prod.spline.design/fxgvwAZfU318DzBQ/scene.splinecode" 
-                    className="w-full h-full scale-125"
-                    loading="lazy"
-                    events-target="global"
-                  />
-                </div>
+                <SplineViewer />
               </motion.div>
             </div>
           </div>
@@ -225,7 +224,7 @@ export default function Home() {
                 <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-2xl blur-xl"></div>
                 <div className="relative bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl">
                   <Globe className="h-16 w-16 text-purple-400 mx-auto mb-6" />
-                  <h3 className="text-2xl font-bold text-center mb-4">Lucra AI's Smart Wallet Assistant</h3>
+                  <h3 className="text-2xl font-bold text-center mb-4">Lucra AI&apos;s Smart Wallet Assistant</h3>
                   <p className="text-gray-300 text-center">
                     Lucra AI simplifies your financial interactions, allowing you to manage your wallet effortlessly
                     through natural conversation.
@@ -279,7 +278,7 @@ export default function Home() {
               />
             </div>
             <blockquote className="text-2xl font-light italic mb-6">
-              "Lucra AI has transformed the way I manage my finances. It's like having a personal CFO at my fingertips!"
+              &ldquo;Lucra AI has transformed the way I manage my finances. It&apos;s like having a personal CFO at my fingertips!&rdquo;
             </blockquote>
             <div className="font-medium">
               <p className="text-white">Emily Johnson</p>
@@ -343,7 +342,7 @@ export default function Home() {
 
           <div className="text-center mt-12">
             <h3 className="text-xl font-semibold mb-4">Still have questions?</h3>
-            <p className="text-gray-300 mb-6">We're here to help with any inquiries.</p>
+            <p className="text-gray-300 mb-6">We&apos;re here to help with any inquiries.</p>
             <Button className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-8">
               Contact
             </Button>
