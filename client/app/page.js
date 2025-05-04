@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { motion } from "framer-motion"
 import dynamic from "next/dynamic"
+import { ConnectWallet } from "@/web3"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -56,14 +57,14 @@ export default function Home() {
       </div>
 
       {/* Header */}
-      <motion.header 
+      <motion.header
         initial={{ y: -100 }}
         animate={{ y: 0 }}
         transition={{ type: "spring", damping: 20 }}
         className="relative z-10 px-4 sm:px-6 lg:px-8 py-6 bg-black/10 backdrop-blur-lg border-b border-white/10"
       >
         <div className="flex justify-between items-center max-w-7xl mx-auto">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
@@ -90,17 +91,13 @@ export default function Home() {
                 Member Perks
               </Button>
             </motion.div>
-            <motion.div whileHover={{ scale: 1.05 }}>
-              <Button className="bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-medium">
-                Connect Wallet
-              </Button>
-            </motion.div>
+            <ConnectWallet />
           </div>
         </div>
       </motion.header>
 
       {/* Hero Section */}
-      <motion.section 
+      <motion.section
         initial="initial"
         animate="animate"
         variants={fadeIn}
@@ -109,7 +106,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row items-center gap-12">
             <div className="md:w-1/2 space-y-6">
-              <motion.h1 
+              <motion.h1
                 variants={fadeIn}
                 className="text-4xl md:text-6xl font-light leading-tight tracking-tight"
               >
@@ -118,14 +115,14 @@ export default function Home() {
                   Lucra AI
                 </span>
               </motion.h1>
-              <motion.p 
+              <motion.p
                 variants={fadeIn}
                 className="text-lg text-white/60 font-light tracking-wide leading-relaxed"
               >
-                Experience seamless financial management through natural conversations. 
+                Experience seamless financial management through natural conversations.
                 Your AI-powered financial assistant is here.
               </motion.p>
-              <motion.div 
+              <motion.div
                 variants={fadeIn}
                 className="flex flex-col sm:flex-row gap-4 pt-4"
               >
@@ -138,7 +135,7 @@ export default function Home() {
               </motion.div>
             </div>
             <div className="md:w-1/2">
-              <motion.div 
+              <motion.div
                 variants={fadeIn}
                 className="relative"
               >
@@ -152,7 +149,7 @@ export default function Home() {
       {/* Features Section */}
       <section id="features" className="relative z-10 px-4 sm:px-6 lg:px-8 py-20">
         <div className="max-w-7xl mx-auto">
-          <motion.div 
+          <motion.div
             initial={fadeIn.initial}
             whileInView={fadeIn.animate}
             viewport={{ once: true }}

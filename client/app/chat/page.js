@@ -9,6 +9,7 @@ import { useChat } from "ai/react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { motion, AnimatePresence } from "framer-motion"
+import { ConnectWallet, AccountInfo, TransactionUI, useWalletConnection } from "@/web3"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -317,11 +318,7 @@ export default function ChatInterface() {
                 Member Perks
               </Button>
             </motion.div>
-            <motion.div whileHover={{ scale: 1.05 }}>
-              <Button className="bg-white/10 hover:bg-white/20 text-white text-sm">
-                Connect Wallet
-              </Button>
-            </motion.div>
+            <ConnectWallet />
           </div>
         </div>
       </motion.div>
@@ -350,23 +347,7 @@ export default function ChatInterface() {
               >
                 <div className="space-y-2">
                   <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Wallet</h3>
-                  <motion.div whileHover={{ scale: 1.02 }}>
-                    <Card className="p-4 bg-white/5 hover:bg-white/10 transition-colors border-white/10 cursor-pointer">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <motion.div
-                            whileHover={{ rotate: 360 }}
-                            transition={{ duration: 0.5 }}
-                            className="p-2 rounded-lg bg-purple-500/20"
-                          >
-                            <Wallet className="h-4 w-4 text-purple-400" />
-                          </motion.div>
-                          <span className="text-sm font-medium text-white">Main Wallet</span>
-                        </div>
-                        <span className="text-sm font-medium text-purple-400">$1,234.56</span>
-                      </div>
-                    </Card>
-                  </motion.div>
+                  <AccountInfo />
                 </div>
 
                 <div className="space-y-2">
@@ -511,44 +492,7 @@ export default function ChatInterface() {
                       {message.content}
                       {message.role === "assistant" && (
                         message.parsedData && (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
-                          <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.2 }}
-                            className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
-                          >
-                            <div className="flex justify-between items-center mb-2">
-                              <span className="text-white/60">
-                                {message.parsedData.intent === "send" ? "Transaction" : "Split Payment"}
-                              </span>
-                              <motion.span
-                                animate={{ scale: [1, 1.05, 1] }}
-                                transition={{ repeat: Infinity, duration: 2 }}
-                                className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
-                              >
-                                Pending
-                              </motion.span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-white font-medium">
-                                {message.parsedData.amount} {message.parsedData.token || "USDC"} to{" "}
-                                {message.parsedData.recipients && message.parsedData.recipients.length > 0
-                                  ? message.parsedData.recipients.map(r => `@${r}`).join(", ")
-                                  : "recipient"}
-                                {message.parsedData.note ? ` ${message.parsedData.note}` : ""}
-                              </span>
-                              <motion.div whileHover={{ scale: 1.05 }}>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-purple-400 hover:text-purple-300 gap-1"
-                                >
-                                  View
-                                  <ArrowUpRight className="h-3 w-3" />
-                                </Button>
-                              </motion.div>
-                            </div>
-                          </motion.div>
+                          <TransactionUI parsedData={message.parsedData} />
                         ) : (
                           message.content.includes("transaction") && (
                             <motion.div
