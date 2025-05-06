@@ -22,10 +22,14 @@ export function Web3Provider({ children }) {
   }, [])
 
   // Only render children when mounted to prevent hydration errors
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        {mounted ? children : null}
+        {children}
       </QueryClientProvider>
     </WagmiProvider>
   )

@@ -20,34 +20,96 @@ export function useWalletConnection() {
   }, [])
 
   // Function to connect with Injected provider (browser wallet)
-  const connectInjected = () => {
-    connect({ connector: injected() })
+  const connectInjected = async () => {
+    try {
+      // Add a timeout to prevent hanging connections
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 30000)
+      );
+
+      const connectionPromise = connect({ connector: injected() });
+
+      // Race the connection against the timeout
+      await Promise.race([connectionPromise, timeoutPromise]);
+    } catch (error) {
+      console.error('Injected wallet connection error:', error);
+      throw error; // Re-throw to allow the component to handle it
+    }
   }
 
   // Function to connect with MetaMask
-  const connectMetaMask = () => {
-    connect({ connector: metaMask() })
+  const connectMetaMask = async () => {
+    try {
+      // Add a timeout to prevent hanging connections
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 30000)
+      );
+
+      const connectionPromise = connect({ connector: metaMask() });
+
+      // Race the connection against the timeout
+      await Promise.race([connectionPromise, timeoutPromise]);
+    } catch (error) {
+      console.error('MetaMask connection error:', error);
+      throw error; // Re-throw to allow the component to handle it
+    }
   }
 
   // Function to connect with WalletConnect
-  const connectWalletConnect = () => {
-    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '9f9310517adea17021a541eca3140522'
-    connect({ connector: walletConnect({
-      projectId
-    }) })
+  const connectWalletConnect = async () => {
+    try {
+      const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '9f9310517adea17021a541eca3140522'
+
+      // Add a timeout to prevent hanging connections
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 60000)
+      );
+
+      // Use the connector from the config instead of creating a new one
+      const connectionPromise = connect({
+        connector: walletConnect()
+      });
+
+      // Race the connection against the timeout
+      await Promise.race([connectionPromise, timeoutPromise]);
+    } catch (error) {
+      console.error('WalletConnect connection error:', error);
+      throw error; // Re-throw to allow the component to handle it
+    }
   }
 
   // Function to connect with Coinbase Wallet
-  const connectCoinbaseWallet = () => {
-    connect({ connector: coinbaseWallet({
-      appName: 'Lucra AI',
-    }) })
+  const connectCoinbaseWallet = async () => {
+    try {
+      // Add a timeout to prevent hanging connections
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 30000)
+      );
+
+      const connectionPromise = connect({
+        connector: coinbaseWallet({
+          appName: 'Lucra AI',
+          headlessMode: true,
+          reloadOnDisconnect: false,
+        })
+      });
+
+      // Race the connection against the timeout
+      await Promise.race([connectionPromise, timeoutPromise]);
+    } catch (error) {
+      console.error('Coinbase Wallet connection error:', error);
+      throw error; // Re-throw to allow the component to handle it
+    }
   }
 
   // Only allow connections after component is mounted
-  const safeConnect = (fn) => {
+  const safeConnect = async (fn) => {
     if (!isMounted) return
-    fn()
+    try {
+      await fn()
+    } catch (error) {
+      console.error('Connection error:', error)
+    }
   }
 
   return {

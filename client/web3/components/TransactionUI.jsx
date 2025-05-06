@@ -1,17 +1,20 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTransactions } from '../hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, Check, AlertCircle } from 'lucide-react'
+import { useAccount } from 'wagmi'
 
 /**
  * TransactionUI component that handles transaction execution and status display
  * for the chat interface
  */
-export function TransactionUI({ parsedData = {} }) {
+export function TransactionUI({ parsedData = {}, transactionId }) {
   const [isExecuting, setIsExecuting] = useState(false)
+  const [isUpdatingDb, setIsUpdatingDb] = useState(false)
+  const { address } = useAccount()
   const {
     sendPayment,
     splitPayment,
@@ -20,6 +23,49 @@ export function TransactionUI({ parsedData = {} }) {
     isConfirming,
     isConfirmed
   } = useTransactions()
+
+  // Update transaction status in Supabase when transaction status changes
+  useEffect(() => {
+    const updateTransactionStatus = async () => {
+      if (!address || !hash || isUpdatingDb) return
+
+      try {
+        setIsUpdatingDb(true)
+
+        // Determine the status
+        let status = 'pending'
+        if (isPending) status = 'sending'
+        if (isConfirming) status = 'confirming'
+        if (isConfirmed) status = 'completed'
+
+        // Call the API to update the transaction status
+        const response = await fetch('/api/transactions/update', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            transactionId, // If provided by the parent component
+            transactionHash: hash,
+            status,
+            walletAddress: address
+          })
+        })
+
+        if (!response.ok) {
+          console.error('Failed to update transaction status in database')
+        }
+      } catch (error) {
+        console.error('Error updating transaction status:', error)
+      } finally {
+        setIsUpdatingDb(false)
+      }
+    }
+
+    if (hash && isExecuting) {
+      updateTransactionStatus()
+    }
+  }, [hash, isPending, isConfirming, isConfirmed, address, isExecuting, transactionId, isUpdatingDb])
 
   // Execute the transaction based on the parsed data
   const executeTransaction = () => {
@@ -145,6 +191,17 @@ export function TransactionUI({ parsedData = {} }) {
       {hash && (
         <div className="mt-2 text-xs text-white/60 truncate">
           TX: {hash}
+        </div>
+      )}
+
+      {isUpdatingDb && (
+        <div className="mt-2 text-xs text-purple-400 flex items-center gap-1">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+            className="h-3 w-3 border-2 border-purple-400 border-t-transparent rounded-full"
+          />
+          Syncing with database...
         </div>
       )}
     </div>

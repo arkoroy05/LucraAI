@@ -1,9 +1,11 @@
 "use client"
 
-import { useAccount, useBalance } from 'wagmi'
+import { useAccount } from 'wagmi'
 import { Card } from '@/components/ui/card'
 import { motion } from 'framer-motion'
 import { Wallet } from 'lucide-react'
+import { useWalletBalance } from '../hooks/useWalletBalance'
+import { formatAddress } from '../utils/balanceUtils'
 
 /**
  * AccountInfo component that displays the connected wallet's information
@@ -11,9 +13,11 @@ import { Wallet } from 'lucide-react'
  */
 export function AccountInfo() {
   const { address, isConnected } = useAccount()
-  const { data: balance } = useBalance({
-    address: address || undefined,
-  })
+  const {
+    nativeDisplayBalance,
+    isNativeBalanceLoading,
+    refreshBalances
+  } = useWalletBalance()
 
   if (!isConnected || !address) {
     return null
@@ -36,15 +40,21 @@ export function AccountInfo() {
                 Wallet
               </span>
               <span className="text-xs text-white/60">
-                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ''}
+                {address ? formatAddress(address) : ''}
               </span>
             </div>
           </div>
-          {balance && (
-            <span className="text-sm font-medium text-purple-400">
-              {parseFloat(balance.formatted).toFixed(4)} {balance.symbol}
-            </span>
-          )}
+          <div
+            className="text-sm font-medium text-purple-400 cursor-pointer"
+            onClick={refreshBalances}
+            title="Click to refresh balance"
+          >
+            {isNativeBalanceLoading ? (
+              <span className="animate-pulse">Loading...</span>
+            ) : (
+              nativeDisplayBalance
+            )}
+          </div>
         </div>
       </Card>
     </motion.div>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Send, Mic, Wallet, ArrowUpRight, Menu } from "lucide-react"
+import { Send, Mic, Wallet, ArrowUpRight, Menu, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Avatar } from "@/components/ui/avatar"
@@ -10,6 +10,12 @@ import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { motion, AnimatePresence } from "framer-motion"
 import { ConnectWallet, AccountInfo, TransactionUI, useWalletConnection } from "@/web3"
+import { useAccount } from "wagmi"
+import { storeWalletAddress } from "@/utils/supabase"
+import ChatHistory from "@/components/ChatHistory"
+import TransactionHistory from "@/components/TransactionHistory"
+import { useWalletBalance } from "@/web3/hooks/useWalletBalance"
+import { formatTokenAmount } from "@/web3/utils/balanceUtils"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -47,6 +53,27 @@ function useWindowSize() {
 }
 
 export default function ChatInterface() {
+  const { address, isConnected } = useAccount()
+  const [activeTab, setActiveTab] = useState('chat') // 'chat', 'history', 'transactions'
+  const {
+    nativeDisplayBalance,
+    balances,
+    refreshBalances,
+    isLoading: isBalanceLoading
+  } = useWalletBalance()
+
+  // Store wallet address in Supabase when connected
+  useEffect(() => {
+    if (isConnected && address) {
+      storeWalletAddress(address, 'wagmi')
+        .then(() => console.log('Wallet address stored in Supabase'))
+        .catch(err => console.error('Error storing wallet address:', err))
+
+      // Refresh balances when wallet is connected
+      refreshBalances()
+    }
+  }, [isConnected, address, refreshBalances])
+
   const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat({
     api: '/api/chat',
     id: 'lucra-chat',
@@ -55,7 +82,8 @@ export default function ChatInterface() {
       clientInfo: {
         clientId: 'lucra-web-client',
         clientVersion: '1.0.0'
-      }
+      },
+      walletAddress: address
     },
     onResponse: (response) => {
       // This is called when the API response is received
@@ -351,20 +379,50 @@ export default function ChatInterface() {
                 </div>
 
                 <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Quick Actions</h3>
+                  <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Navigation</h3>
                   <div className="space-y-1">
-                    {['Send Crypto', 'Swap Tokens', 'View History', 'Settings'].map((action, index) => (
-                      <motion.button
-                        key={action}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        whileHover={{ scale: 1.02, x: 5 }}
-                        className="w-full p-3 text-left text-sm text-white/80 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                      >
-                        {action}
-                      </motion.button>
-                    ))}
+                    <motion.button
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.1 }}
+                      whileHover={{ scale: 1.02, x: 5 }}
+                      className={`w-full p-3 text-left text-sm ${activeTab === 'chat' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
+                      onClick={() => setActiveTab('chat')}
+                    >
+                      Chat
+                    </motion.button>
+
+                    <motion.button
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.2 }}
+                      whileHover={{ scale: 1.02, x: 5 }}
+                      className={`w-full p-3 text-left text-sm ${activeTab === 'history' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
+                      onClick={() => setActiveTab('history')}
+                    >
+                      Chat History
+                    </motion.button>
+
+                    <motion.button
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.3 }}
+                      whileHover={{ scale: 1.02, x: 5 }}
+                      className={`w-full p-3 text-left text-sm ${activeTab === 'transactions' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
+                      onClick={() => setActiveTab('transactions')}
+                    >
+                      Transaction History
+                    </motion.button>
+
+                    <motion.button
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.4 }}
+                      whileHover={{ scale: 1.02, x: 5 }}
+                      className="w-full p-3 text-left text-sm text-white/80 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                    >
+                      Settings
+                    </motion.button>
                   </div>
                 </div>
               </motion.div>
@@ -375,261 +433,303 @@ export default function ChatInterface() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col md:ml-72 mt-16 relative z-10">
-        {/* Chat container */}
+        {/* Content container */}
         <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full p-6">
-          {/* Welcome message */}
-          <AnimatePresence>
-            {messages.length === 0 && (
+          {/* Tab content */}
+          <AnimatePresence mode="wait">
+            {activeTab === 'chat' && (
               <motion.div
-                variants={fadeIn}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                className="text-center transform mb-12"
+                key="chat-tab"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1 flex flex-col"
               >
-                <motion.h1
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-6xl md:text-7xl font-light tracking-tight text-white mb-6"
-                >
-                  lucra<span className="font-semibold">AI</span>
-                </motion.h1>
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.4 }}
-                  className="text-white/80 text-xl mb-12"
-                >
-                  Your AI-powered crypto assistant
-                </motion.p>
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 }}
-                  className="grid grid-cols-2 gap-4 max-w-2xl mx-auto"
-                >
-                  {[
-                    'Send 0.1 ETH to Alex',
-                    'Check my balance',
-                    'Swap 10 USDC to SOL',
-                    'Show transaction history'
-                  ].map((action, index) => (
+                {/* Welcome message */}
+                <AnimatePresence>
+                  {messages.length === 0 && (
                     <motion.div
-                      key={action}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.8 + index * 0.1 }}
-                      whileHover={{ scale: 1.02 }}
+                      variants={fadeIn}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      className="text-center transform mb-12"
                     >
-                      <Button
-                        variant="outline"
-                        className="w-full py-6 text-sm bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-200"
-                        onClick={() => {
-                          // Set the input value to the action text
-                          setInput(action);
-                          // Submit the form with the action text
-                          customSubmit({ preventDefault: () => {} });
-                        }}
+                      <motion.h1
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="text-6xl md:text-7xl font-light tracking-tight text-white mb-6"
                       >
-                        {action}
-                      </Button>
+                        lucra<span className="font-semibold">AI</span>
+                      </motion.h1>
+                      <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.4 }}
+                        className="text-white/80 text-xl mb-12"
+                      >
+                        Your AI-powered crypto assistant
+                      </motion.p>
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.6 }}
+                        className="grid grid-cols-2 gap-4 max-w-2xl mx-auto"
+                      >
+                        {[
+                          'Send 0.1 ETH to Alex',
+                          'Check my balance',
+                          'Swap 10 USDC to SOL',
+                          'Show transaction history'
+                        ].map((action, index) => (
+                          <motion.div
+                            key={action}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.8 + index * 0.1 }}
+                            whileHover={{ scale: 1.02 }}
+                          >
+                            <Button
+                              variant="outline"
+                              className="w-full py-6 text-sm bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-200"
+                              onClick={() => {
+                                // Set the input value to the action text
+                                setInput(action);
+                                // Submit the form with the action text
+                                customSubmit({ preventDefault: () => {} });
+                              }}
+                            >
+                              {action}
+                            </Button>
+                          </motion.div>
+                        ))}
+                      </motion.div>
                     </motion.div>
-                  ))}
+                  )}
+                </AnimatePresence>
+
+                {/* Messages */}
+                <div className="flex-1 space-y-6">
+                  <AnimatePresence>
+                    {messages.map((message) => (
+                      <motion.div
+                        key={message.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className={cn(
+                          "flex",
+                          message.role === "user" ? "justify-end" : "justify-start"
+                        )}
+                        data-message-id={message.id}
+                        data-role={message.role}
+                      >
+                        <motion.div
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          className={cn(
+                            "flex items-start max-w-[80%] gap-4",
+                            message.role === "user" ? "flex-row-reverse" : "flex-row"
+                          )}
+                        >
+                          <motion.div whileHover={{ scale: 1.1 }}>
+                            <Avatar
+                              className={cn(
+                                "h-10 w-10 border border-white/10 ring-2 ring-white/10",
+                                message.role === "user" ? "bg-purple-500/80" : "bg-white/10"
+                              )}
+                            >
+                              <div className="flex items-center justify-center h-full text-white text-sm font-medium">
+                                {message.role === "user" ? "U" : "AI"}
+                              </div>
+                            </Avatar>
+                          </motion.div>
+
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ type: "spring", damping: 20 }}
+                            className={cn(
+                              "rounded-2xl p-5 text-sm leading-relaxed message-content",
+                              message.role === "user"
+                                ? "bg-purple-500/30 text-white backdrop-blur-sm"
+                                : "bg-white/10 text-white/90 backdrop-blur-sm border border-white/10"
+                            )}
+                          >
+                            {message.content === "__FETCH_BALANCE__" && isConnected
+                              ? `Your current balance is ${nativeDisplayBalance}. Would you like to see a breakdown by token?`
+                              : message.content === "__FETCH_BALANCE__" && !isConnected
+                              ? "Please connect your wallet to check your balance."
+                              : message.content}
+
+                            {message.role === "assistant" && (
+                              message.parsedData && (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
+                                <TransactionUI parsedData={message.parsedData} />
+                              ) : (
+                                message.content.includes("transaction") && (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.2 }}
+                                    className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
+                                  >
+                                    <div className="flex justify-between items-center mb-2">
+                                      <span className="text-white/60">Transaction</span>
+                                      <motion.span
+                                        animate={{ scale: [1, 1.05, 1] }}
+                                        transition={{ repeat: Infinity, duration: 2 }}
+                                        className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
+                                      >
+                                        Pending
+                                      </motion.span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-white font-medium">0.1 ETH to Alex</span>
+                                      <motion.div whileHover={{ scale: 1.05 }}>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="text-purple-400 hover:text-purple-300 gap-1"
+                                        >
+                                          View
+                                          <ArrowUpRight className="h-3 w-3" />
+                                        </Button>
+                                      </motion.div>
+                                    </div>
+                                  </motion.div>
+                                )
+                              )
+                            )}
+                          </motion.div>
+                        </motion.div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+                <div ref={messagesEndRef} />
+
+                {/* Input area */}
+                <motion.div
+                  initial={{ y: 100 }}
+                  animate={{ y: 0 }}
+                  transition={{ type: "spring", damping: 20 }}
+                  className="sticky bottom-6 mt-6"
+                >
+                  <Card className="backdrop-blur-xl bg-white/10 border-white/20 overflow-hidden">
+                    <div className="flex flex-col gap-2">
+                      {/* Suggestion chips */}
+                      {suggestions.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex flex-wrap gap-2 px-4 pb-2"
+                        >
+                          {suggestions.map((suggestion, index) => (
+                            <motion.div
+                              key={suggestion}
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ delay: index * 0.1 }}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="bg-purple-500/20 border-purple-500/30 text-white hover:bg-purple-500/30 hover:border-purple-500/40"
+                                onClick={() => handleSuggestionClick(suggestion)}
+                              >
+                                {suggestion}
+                              </Button>
+                            </motion.div>
+                          ))}
+                        </motion.div>
+                      )}
+
+                      <form onSubmit={customSubmit} className="flex items-center gap-4 p-4">
+                        <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "rounded-xl h-10 w-10 transition-all duration-300",
+                              isRecording
+                                ? "text-red-400 bg-red-500/20 hover:bg-red-500/30 ring-4 ring-red-500/20"
+                                : "text-white/60 hover:text-white hover:bg-white/10"
+                            )}
+                            onClick={toggleRecording}
+                          >
+                            <Mic className="h-5 w-5" />
+                          </Button>
+                        </motion.div>
+
+                        <Input
+                          value={input}
+                          onChange={handleInputChange}
+                          placeholder={isRecording ? "Listening..." : "Type a message or speak to send crypto..."}
+                          disabled={isRecording}
+                          className="bg-transparent border-0 focus-visible:ring-0 placeholder:text-white/40 text-white"
+                          onKeyDown={(e) => {
+                            // Submit on Enter key press (without Shift key)
+                            if (e.key === 'Enter' && !e.shiftKey && input.trim() !== '') {
+                              e.preventDefault();
+                              customSubmit(e);
+                            }
+                          }}
+                        />
+
+                        <motion.div
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          style={{ opacity: isLoading || input.trim() === "" ? 0.5 : 1 }}
+                        >
+                          <Button
+                            type="submit"
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "rounded-xl h-10 w-10 transition-all duration-300",
+                              "text-white/60 hover:text-white hover:bg-white/10"
+                            )}
+                            disabled={isLoading || input.trim() === ""}
+                          >
+                            <Send className="h-5 w-5" />
+                          </Button>
+                        </motion.div>
+                      </form>
+                    </div>
+                  </Card>
                 </motion.div>
               </motion.div>
             )}
+
+            {activeTab === 'history' && (
+              <motion.div
+                key="history-tab"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1"
+              >
+                <ChatHistory />
+              </motion.div>
+            )}
+
+            {activeTab === 'transactions' && (
+              <motion.div
+                key="transactions-tab"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1"
+              >
+                <TransactionHistory />
+              </motion.div>
+            )}
           </AnimatePresence>
-
-          {/* Messages */}
-          <div className="flex-1 space-y-6">
-            <AnimatePresence>
-              {messages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className={cn(
-                    "flex",
-                    message.role === "user" ? "justify-end" : "justify-start"
-                  )}
-                  data-message-id={message.id}
-                  data-role={message.role}
-                >
-                  <motion.div
-                    initial={{ scale: 0.8 }}
-                    animate={{ scale: 1 }}
-                    className={cn(
-                      "flex items-start max-w-[80%] gap-4",
-                      message.role === "user" ? "flex-row-reverse" : "flex-row"
-                    )}
-                  >
-                    <motion.div whileHover={{ scale: 1.1 }}>
-                      <Avatar
-                        className={cn(
-                          "h-10 w-10 border border-white/10 ring-2 ring-white/10",
-                          message.role === "user" ? "bg-purple-500/80" : "bg-white/10"
-                        )}
-                      >
-                        <div className="flex items-center justify-center h-full text-white text-sm font-medium">
-                          {message.role === "user" ? "U" : "AI"}
-                        </div>
-                      </Avatar>
-                    </motion.div>
-
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ type: "spring", damping: 20 }}
-                      className={cn(
-                        "rounded-2xl p-5 text-sm leading-relaxed message-content",
-                        message.role === "user"
-                          ? "bg-purple-500/30 text-white backdrop-blur-sm"
-                          : "bg-white/10 text-white/90 backdrop-blur-sm border border-white/10"
-                      )}
-                    >
-                      {message.content}
-                      {message.role === "assistant" && (
-                        message.parsedData && (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
-                          <TransactionUI parsedData={message.parsedData} />
-                        ) : (
-                          message.content.includes("transaction") && (
-                            <motion.div
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: 0.2 }}
-                              className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
-                            >
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="text-white/60">Transaction</span>
-                                <motion.span
-                                  animate={{ scale: [1, 1.05, 1] }}
-                                  transition={{ repeat: Infinity, duration: 2 }}
-                                  className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
-                                >
-                                  Pending
-                                </motion.span>
-                              </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-white font-medium">0.1 ETH to Alex</span>
-                                <motion.div whileHover={{ scale: 1.05 }}>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="text-purple-400 hover:text-purple-300 gap-1"
-                                  >
-                                    View
-                                    <ArrowUpRight className="h-3 w-3" />
-                                  </Button>
-                                </motion.div>
-                              </div>
-                            </motion.div>
-                          )
-                        )
-                      )}
-                    </motion.div>
-                  </motion.div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-          <div ref={messagesEndRef} />
-
-          {/* Input area */}
-          <motion.div
-            initial={{ y: 100 }}
-            animate={{ y: 0 }}
-            transition={{ type: "spring", damping: 20 }}
-            className="sticky bottom-6 mt-6"
-          >
-            <Card className="backdrop-blur-xl bg-white/10 border-white/20 overflow-hidden">
-              <div className="flex flex-col gap-2">
-                {/* Suggestion chips */}
-                {suggestions.length > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex flex-wrap gap-2 px-4 pb-2"
-                  >
-                    {suggestions.map((suggestion, index) => (
-                      <motion.div
-                        key={suggestion}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: index * 0.1 }}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="bg-purple-500/20 border-purple-500/30 text-white hover:bg-purple-500/30 hover:border-purple-500/40"
-                          onClick={() => handleSuggestionClick(suggestion)}
-                        >
-                          {suggestion}
-                        </Button>
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                )}
-
-                <form onSubmit={customSubmit} className="flex items-center gap-4 p-4">
-                  <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className={cn(
-                        "rounded-xl h-10 w-10 transition-all duration-300",
-                        isRecording
-                          ? "text-red-400 bg-red-500/20 hover:bg-red-500/30 ring-4 ring-red-500/20"
-                          : "text-white/60 hover:text-white hover:bg-white/10"
-                      )}
-                      onClick={toggleRecording}
-                    >
-                      <Mic className="h-5 w-5" />
-                    </Button>
-                  </motion.div>
-
-                  <Input
-                    value={input}
-                    onChange={handleInputChange}
-                    placeholder={isRecording ? "Listening..." : "Type a message or speak to send crypto..."}
-                    disabled={isRecording}
-                    className="bg-transparent border-0 focus-visible:ring-0 placeholder:text-white/40 text-white"
-                    onKeyDown={(e) => {
-                      // Submit on Enter key press (without Shift key)
-                      if (e.key === 'Enter' && !e.shiftKey && input.trim() !== '') {
-                        e.preventDefault();
-                        customSubmit(e);
-                      }
-                    }}
-                  />
-
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    style={{ opacity: isLoading || input.trim() === "" ? 0.5 : 1 }}
-                  >
-                    <Button
-                      type="submit"
-                      variant="ghost"
-                      size="icon"
-                      className={cn(
-                        "rounded-xl h-10 w-10 transition-all duration-300",
-                        "text-white/60 hover:text-white hover:bg-white/10"
-                      )}
-                      disabled={isLoading || input.trim() === ""}
-                    >
-                      <Send className="h-5 w-5" />
-                    </Button>
-                  </motion.div>
-                </form>
-              </div>
-            </Card>
-          </motion.div>
         </div>
       </div>
     </div>

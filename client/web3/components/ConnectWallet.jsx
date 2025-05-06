@@ -13,10 +13,12 @@ import { Wallet, X } from 'lucide-react'
 export function ConnectWallet() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
+  const [connectionError, setConnectionError] = useState(null)
   const {
     isConnected,
     address,
     isPending,
+    error,
     connectInjected,
     connectMetaMask,
     connectWalletConnect,
@@ -41,10 +43,24 @@ export function ConnectWallet() {
   }
 
   // Connect with the selected wallet and close the modal
-  const connectWallet = (connectFunction) => {
-    connectFunction()
-    setIsModalOpen(false)
+  const connectWallet = async (connectFunction) => {
+    try {
+      setConnectionError(null)
+      await connectFunction()
+      setIsModalOpen(false)
+    } catch (error) {
+      console.error('Error connecting wallet:', error)
+      setConnectionError('Connection failed. Please try again.')
+      // Keep modal open if there's an error
+    }
   }
+
+  // Update connection error when wagmi error changes
+  useEffect(() => {
+    if (error) {
+      setConnectionError(error.message || 'Connection failed. Please try again.')
+    }
+  }, [error])
 
   // Don't render anything during SSR to prevent hydration errors
   if (!isMounted) {
@@ -83,12 +99,12 @@ export function ConnectWallet() {
 
       {/* Wallet Connection Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-auto my-auto relative left-0 right-0"
+            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-4 my-auto"
             style={{ maxHeight: '90vh', overflowY: 'auto' }}
           >
             <div className="flex justify-between items-center mb-6">
@@ -144,6 +160,12 @@ export function ConnectWallet() {
                 </Button>
               </motion.div>
             </div>
+
+            {connectionError && (
+              <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
+                <p className="text-red-400 text-sm text-center">{connectionError}</p>
+              </div>
+            )}
 
             <p className="text-white/40 text-xs mt-6 text-center">
               By connecting your wallet, you agree to our Terms of Service and Privacy Policy

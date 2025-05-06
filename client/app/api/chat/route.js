@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import supabaseServer from '@/utils/supabase-server';
 
 // Initialize the Google Generative AI with your API key
 // Access the API key directly from the environment variable
@@ -83,12 +84,14 @@ async function parseUserMessage(message) {
       Your task is to parse user messages and identify payment-related intents.
 
       Extract the following information from the user message:
-      1. Intent (send, split, check_balance, transaction_history, etc.)
+      1. Intent (send, split, check_balance, transaction_history, chat_history, history, etc.)
       2. Amount (if applicable)
       3. Currency/Token (default to USDC if not specified)
       4. Recipients (extract names/addresses with @ symbol if present)
       5. Split type (equal, percentage, custom amounts)
       6. Reason/note for the transaction (if provided)
+      7. History type (transactions, chat, all) for history-related intents
+      8. Limit (number of records to return) for history-related intents
 
       Return the extracted information in JSON format with these fields:
       {
@@ -97,13 +100,18 @@ async function parseUserMessage(message) {
         "token": string,
         "recipients": array of strings,
         "split_type": string or null,
-        "note": string or null
+        "note": string or null,
+        "history_type": string or null,
+        "limit": number or null
       }
 
       Examples:
       - "Send 50 USDC to @alice.base" → {"intent": "send", "amount": 50, "token": "USDC", "recipients": ["alice.base"], "split_type": null, "note": null}
       - "Split 100 equally between @bob and @charlie for dinner" → {"intent": "split", "amount": 100, "token": "USDC", "recipients": ["bob", "charlie"], "split_type": "equal", "note": "for dinner"}
       - "Check my balance" → {"intent": "check_balance", "amount": null, "token": null, "recipients": [], "split_type": null, "note": null}
+      - "Show my transaction history" → {"intent": "transaction_history", "history_type": "transactions", "limit": 10}
+      - "Show my chat history" → {"intent": "chat_history", "history_type": "chat", "limit": 10}
+      - "Show my last 5 transactions" → {"intent": "transaction_history", "history_type": "transactions", "limit": 5}
     `;
 
     try {
@@ -196,8 +204,8 @@ Extracted JSON:`;
 }
 
 // Function to generate AI response based on parsed data
-function generateAIResponse(parsedData) {
-  const { intent, amount, token, recipients, split_type, note, error } = parsedData;
+async function generateAIResponse(parsedData, walletAddress) {
+  const { intent, amount, token, recipients, split_type, note, error, history_type, limit } = parsedData;
 
   // If there was an error in parsing
   if (error) {
@@ -207,26 +215,88 @@ function generateAIResponse(parsedData) {
   // Generate response based on intent
   switch (intent) {
     case 'send':
-      const recipientText = recipients.length > 0
+      const recipientText = recipients && recipients.length > 0
         ? recipients.map(r => `@${r}`).join(' and ')
         : 'the recipient';
 
       return `I've prepared a transaction to send ${amount} ${token} to ${recipientText}${note ? ` ${note}` : ''}. Would you like to confirm this transaction?`;
 
     case 'split':
-      const splitRecipients = recipients.map(r => `@${r}`).join(' and ');
+      const splitRecipients = recipients && recipients.length > 0
+        ? recipients.map(r => `@${r}`).join(' and ')
+        : 'the recipients';
       const splitTypeText = split_type === 'equal' ? 'equally' : 'as specified';
 
       return `I'll split ${amount} ${token} ${splitTypeText} between ${splitRecipients}${note ? ` ${note}` : ''}. Is this correct?`;
 
     case 'check_balance':
-      return `Your current balance is 1,234.56 USDC. Would you like to see a breakdown by token?`;
+      // We'll fetch the actual balance from the client side
+      // and replace this placeholder in the UI
+      return `__FETCH_BALANCE__`;
 
     case 'transaction_history':
-      return `Here's your recent transaction history. You've made 5 transactions in the past week, totaling 325 USDC.`;
+    case 'chat_history':
+    case 'history':
+      if (walletAddress) {
+        try {
+          // Determine the history type
+          const historyType = history_type || (intent === 'transaction_history' ? 'transactions' : intent === 'chat_history' ? 'chat' : 'all');
+          const historyLimit = limit || 10;
+
+          // Call the history function directly using supabaseServer
+          const { data, error: historyError } = await supabaseServer.rpc('get_history', {
+            p_wallet_address: walletAddress,
+            p_type: historyType,
+            p_limit: historyLimit
+          });
+
+          if (historyError) {
+            console.error('Error fetching history:', historyError);
+            // Fallback response if API call fails
+            return `I'm having trouble retrieving your ${historyType === 'transactions' ? 'transaction' : historyType === 'chat' ? 'chat' : ''} history right now. Please try again later.`;
+          }
+
+          if (historyType === 'transactions') {
+            if (!data || data.length === 0) {
+              return `You don't have any transaction history yet. Once you make transactions, they'll appear here.`;
+            }
+
+            let totalAmount = 0;
+            const recentDate = new Date(data[0].created_at);
+
+            data.forEach(tx => {
+              if (tx.amount) totalAmount += parseFloat(tx.amount);
+            });
+
+            return `Here's your recent transaction history. You've made ${data.length} transactions, with the most recent on ${recentDate.toLocaleDateString()}, totaling approximately ${totalAmount.toFixed(2)} ${data[0].token || 'USDC'}.`;
+          } else if (historyType === 'chat') {
+            if (!data || data.length === 0) {
+              return `You don't have any chat history yet. As we converse, your chat history will be saved here.`;
+            }
+
+            const recentDate = new Date(data[0].created_at);
+            return `I found ${data.length} messages in your chat history, with the most recent from ${recentDate.toLocaleDateString()}.`;
+          } else {
+            // Combined history
+            if (!data || data.length === 0) {
+              return `You don't have any history yet. As you use Lucra AI, your history will be saved here.`;
+            }
+
+            const txCount = data.filter(item => item.transaction_type).length;
+            const chatCount = data.filter(item => item.is_user !== undefined).length;
+
+            return `I found ${data.length} items in your history: ${txCount} transactions and ${chatCount} chat messages.`;
+          }
+        } catch (error) {
+          console.error('Error fetching history:', error);
+          return `I'm having trouble retrieving your history right now. Please try again later.`;
+        }
+      } else {
+        return `Please connect your wallet to view your ${intent === 'transaction_history' ? 'transaction' : intent === 'chat_history' ? 'chat' : ''} history.`;
+      }
 
     default:
-      return `I understand you want to ${intent}. How can I help you with that?`;
+      return `I understand you want to ${intent || 'do something'}. How can I help you with that?`;
   }
 }
 
@@ -246,7 +316,7 @@ export async function POST(req) {
 
     // Parse the request body
     const body = await req.json();
-    const { messages } = body;
+    const { messages, walletAddress } = body;
 
     // Get the last user message
     const lastUserMessage = messages[messages.length - 1];
@@ -266,7 +336,74 @@ export async function POST(req) {
       const parsedData = await parseUserMessage(lastUserMessage.content);
 
       // Generate AI response
-      const aiResponse = generateAIResponse(parsedData);
+      const aiResponse = await generateAIResponse(parsedData, walletAddress);
+
+      // Store the user message in Supabase if wallet address is provided
+      if (walletAddress) {
+        try {
+          // First check if the user exists
+          const { data: user } = await supabaseServer
+            .from('users')
+            .select('id')
+            .eq('wallet_address', walletAddress)
+            .single();
+
+          if (user) {
+            // Store the user message
+            await supabaseServer
+              .from('chat_history')
+              .insert([
+                {
+                  user_id: user.id,
+                  message: lastUserMessage.content,
+                  is_user: true,
+                  created_at: new Date().toISOString()
+                }
+              ]);
+
+            // Store the AI response
+            await supabaseServer
+              .from('chat_history')
+              .insert([
+                {
+                  user_id: user.id,
+                  message: aiResponse,
+                  is_user: false,
+                  created_at: new Date().toISOString(),
+                  metadata: parsedData.intent === 'send' || parsedData.intent === 'split' ? { transaction: parsedData } : null
+                }
+              ]);
+
+            // If this is a transaction, store it in the transactions table
+            if (parsedData.intent === 'send' || parsedData.intent === 'split') {
+              await supabaseServer
+                .from('transactions')
+                .insert([
+                  {
+                    user_id: user.id,
+                    transaction_hash: null, // Will be updated when the transaction is executed
+                    transaction_type: parsedData.intent,
+                    amount: parsedData.amount || 0,
+                    token: parsedData.token || 'USDC',
+                    recipient_address: parsedData.recipients && parsedData.recipients.length > 0
+                      ? parsedData.recipients[0]
+                      : 'unknown',
+                    status: 'pending',
+                    note: parsedData.note || '',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    metadata: parsedData
+                  }
+                ]);
+            }
+          } else {
+            console.log('User not found in database:', walletAddress);
+          }
+        } catch (dbError) {
+          console.error('Error storing message in database:', dbError);
+          // Continue with the response even if database storage fails
+        }
+      }
 
       // Create a response in the format expected by the Vercel AI SDK
       // For text-based responses (non-streaming), we need to return plain text
@@ -290,6 +427,47 @@ export async function POST(req) {
       };
 
       const fallbackResponse = 'I understand you said: "' + lastUserMessage.content + '". How can I help you with that?';
+
+      // Store the messages in Supabase if wallet address is provided
+      if (walletAddress) {
+        try {
+          // First check if the user exists
+          const { data: user } = await supabaseServer
+            .from('users')
+            .select('id')
+            .eq('wallet_address', walletAddress)
+            .single();
+
+          if (user) {
+            // Store the user message
+            await supabaseServer
+              .from('chat_history')
+              .insert([
+                {
+                  user_id: user.id,
+                  message: lastUserMessage.content,
+                  is_user: true,
+                  created_at: new Date().toISOString()
+                }
+              ]);
+
+            // Store the AI response
+            await supabaseServer
+              .from('chat_history')
+              .insert([
+                {
+                  user_id: user.id,
+                  message: fallbackResponse,
+                  is_user: false,
+                  created_at: new Date().toISOString()
+                }
+              ]);
+          }
+        } catch (dbError) {
+          console.error('Error storing message in database:', dbError);
+          // Continue with the response even if database storage fails
+        }
+      }
 
       return new Response(fallbackResponse, {
         headers: {
