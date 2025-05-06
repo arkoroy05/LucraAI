@@ -3,10 +3,14 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Supabase client for browser-side usage
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://esjxiettkmjomggqobzi.supabase.co'
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzanhpZXR0a21qb21nZ3FvYnppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY0MjAwNjcsImV4cCI6MjA2MTk5NjA2N30.dLV3mfYlR3h6lnADfqEvPqPeSKp3Lz17OIAw6UJGrnU'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables. Please check your .env file.')
+}
+
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
 
 /**
  * Stores a user's wallet address in the database
