@@ -7,6 +7,9 @@ import { injected, metaMask, walletConnect, coinbaseWallet } from 'wagmi/connect
 // Get WalletConnect project ID from environment variable
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '9f9310517adea17021a541eca3140522'
 
+// Log the project ID to help with debugging
+console.log('WalletConnect Project ID:', projectId ? 'Configured' : 'Missing')
+
 // Create the Wagmi configuration
 export const config = createConfig({
   chains: [mainnet, base],
@@ -39,11 +42,9 @@ export const config = createConfig({
     }),
     coinbaseWallet({
       appName: 'Lucra AI',
-      appLogoUrl: 'https://example.com/logo.png', // Add a logo URL (replace with your actual logo)
-      headlessMode: true, // Enable headless mode for better mobile experience
+      headlessMode: false, // Disable headless mode to fix connection issues
       reloadOnDisconnect: false, // Prevent page reload on disconnect
       darkMode: true,
-      jsonRpcUrl: 'https://mainnet.base.org', // Provide a fallback RPC URL
     }),
   ],
   transports: {

@@ -564,10 +564,11 @@ export default function ChatInterface() {
                               : message.content}
 
                             {message.role === "assistant" && (
-                              message.parsedData && (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
-                                <TransactionUI parsedData={message.parsedData} />
+                              message.parsedData && message.parsedData.intent &&
+                              (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
+                                <TransactionUI parsedData={message.parsedData} transactionId={message.id} />
                               ) : (
-                                message.content.includes("transaction") && (
+                                message.content && message.content.includes && message.content.includes("transaction") && (
                                   <motion.div
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}

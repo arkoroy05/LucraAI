@@ -47,10 +47,22 @@ export function ConnectWallet() {
     try {
       setConnectionError(null)
       await connectFunction()
-      setIsModalOpen(false)
+      // Only close modal on successful connection
+      if (isConnected) {
+        setIsModalOpen(false)
+      }
     } catch (error) {
       console.error('Error connecting wallet:', error)
-      setConnectionError('Connection failed. Please try again.')
+      // Provide more specific error messages based on the error
+      if (error.message?.includes('User rejected')) {
+        setConnectionError('Connection rejected. Please approve the connection request.')
+      } else if (error.message?.includes('timed out')) {
+        setConnectionError('Connection timed out. Please try again.')
+      } else if (error.message?.includes('already processing')) {
+        setConnectionError('A connection request is already in progress. Please check your wallet.')
+      } else {
+        setConnectionError(error.message || 'Connection failed. Please try again.')
+      }
       // Keep modal open if there's an error
     }
   }
@@ -58,9 +70,25 @@ export function ConnectWallet() {
   // Update connection error when wagmi error changes
   useEffect(() => {
     if (error) {
-      setConnectionError(error.message || 'Connection failed. Please try again.')
+      // Provide more specific error messages based on the error
+      if (error.message?.includes('User rejected')) {
+        setConnectionError('Connection rejected. Please approve the connection request.')
+      } else if (error.message?.includes('timed out')) {
+        setConnectionError('Connection timed out. Please try again.')
+      } else if (error.message?.includes('already processing')) {
+        setConnectionError('A connection request is already in progress. Please check your wallet.')
+      } else {
+        setConnectionError(error.message || 'Connection failed. Please try again.')
+      }
     }
   }, [error])
+
+  // Close modal when connection is successful
+  useEffect(() => {
+    if (isConnected && isModalOpen) {
+      setIsModalOpen(false)
+    }
+  }, [isConnected, isModalOpen])
 
   // Don't render anything during SSR to prevent hydration errors
   if (!isMounted) {
@@ -104,7 +132,7 @@ export function ConnectWallet() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-4 my-auto"
+            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-auto my-auto relative"
             style={{ maxHeight: '90vh', overflowY: 'auto' }}
           >
             <div className="flex justify-between items-center mb-6">
@@ -124,9 +152,10 @@ export function ConnectWallet() {
                 <Button
                   onClick={() => connectWallet(connectMetaMask)}
                   className="w-full bg-white/5 hover:bg-white/10 text-white border border-white/10 py-4 justify-start"
+                  disabled={isPending}
                 >
                   <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" className="h-5 w-5 mr-3" />
-                  <span>MetaMask</span>
+                  <span>{isPending ? 'Connecting...' : 'MetaMask'}</span>
                 </Button>
               </motion.div>
 
@@ -134,9 +163,10 @@ export function ConnectWallet() {
                 <Button
                   onClick={() => connectWallet(connectCoinbaseWallet)}
                   className="w-full bg-white/5 hover:bg-white/10 text-white border border-white/10 py-4 justify-start"
+                  disabled={isPending}
                 >
                   <img src="https://www.coinbase.com/assets/favicon/favicon-256.png" alt="Coinbase Wallet" className="h-5 w-5 mr-3" />
-                  <span>Coinbase Wallet</span>
+                  <span>{isPending ? 'Connecting...' : 'Coinbase Wallet'}</span>
                 </Button>
               </motion.div>
 
@@ -144,9 +174,10 @@ export function ConnectWallet() {
                 <Button
                   onClick={() => connectWallet(connectWalletConnect)}
                   className="w-full bg-white/5 hover:bg-white/10 text-white border border-white/10 py-4 justify-start"
+                  disabled={isPending}
                 >
                   <img src="https://avatars.githubusercontent.com/u/37784886" alt="WalletConnect" className="h-5 w-5 mr-3" />
-                  <span>WalletConnect</span>
+                  <span>{isPending ? 'Connecting...' : 'WalletConnect'}</span>
                 </Button>
               </motion.div>
 
@@ -154,9 +185,10 @@ export function ConnectWallet() {
                 <Button
                   onClick={() => connectWallet(connectInjected)}
                   className="w-full bg-white/5 hover:bg-white/10 text-white border border-white/10 py-4 justify-start"
+                  disabled={isPending}
                 >
                   <Wallet className="h-5 w-5 mr-3 text-purple-400" />
-                  <span>Browser Wallet</span>
+                  <span>{isPending ? 'Connecting...' : 'Browser Wallet'}</span>
                 </Button>
               </motion.div>
             </div>

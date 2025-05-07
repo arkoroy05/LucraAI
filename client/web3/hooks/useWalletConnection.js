@@ -27,7 +27,13 @@ export function useWalletConnection() {
         setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 30000)
       );
 
-      const connectionPromise = connect({ connector: injected() });
+      // Create the connector instance
+      const injectedConnector = injected();
+
+      // Connect with the connector
+      const connectionPromise = connect({
+        connector: injectedConnector
+      });
 
       // Race the connection against the timeout
       await Promise.race([connectionPromise, timeoutPromise]);
@@ -45,7 +51,13 @@ export function useWalletConnection() {
         setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 30000)
       );
 
-      const connectionPromise = connect({ connector: metaMask() });
+      // Create the connector instance
+      const metaMaskConnector = metaMask();
+
+      // Connect with the connector
+      const connectionPromise = connect({
+        connector: metaMaskConnector
+      });
 
       // Race the connection against the timeout
       await Promise.race([connectionPromise, timeoutPromise]);
@@ -65,9 +77,24 @@ export function useWalletConnection() {
         setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 60000)
       );
 
-      // Use the connector from the config instead of creating a new one
+      // Create the connector instance with the project ID
+      const walletConnectConnector = walletConnect({
+        projectId,
+        showQrModal: true,
+        qrModalOptions: {
+          themeMode: 'dark',
+        },
+        metadata: {
+          name: 'Lucra AI',
+          description: 'Your AI-powered crypto assistant',
+          url: 'https://lucra.ai',
+          icons: ['https://avatars.githubusercontent.com/u/37784886'],
+        },
+      });
+
+      // Connect with the connector
       const connectionPromise = connect({
-        connector: walletConnect()
+        connector: walletConnectConnector
       });
 
       // Race the connection against the timeout
@@ -86,12 +113,17 @@ export function useWalletConnection() {
         setTimeout(() => reject(new Error('Connection timed out. Please try again.')), 30000)
       );
 
+      // Create the connector instance
+      const coinbaseWalletConnector = coinbaseWallet({
+        appName: 'Lucra AI',
+        headlessMode: false,
+        reloadOnDisconnect: false,
+        darkMode: true,
+      });
+
+      // Connect with the connector
       const connectionPromise = connect({
-        connector: coinbaseWallet({
-          appName: 'Lucra AI',
-          headlessMode: true,
-          reloadOnDisconnect: false,
-        })
+        connector: coinbaseWalletConnector
       });
 
       // Race the connection against the timeout
@@ -109,8 +141,23 @@ export function useWalletConnection() {
       await fn()
     } catch (error) {
       console.error('Connection error:', error)
+      // Re-throw the error so it can be caught by the ConnectWallet component
+      throw error
     }
   }
+
+  // Debug function to log connection status
+  useEffect(() => {
+    if (isMounted) {
+      console.log('Wallet connection status:', {
+        isConnected,
+        address,
+        status,
+        isPending,
+        error: error ? error.message : null
+      })
+    }
+  }, [isMounted, isConnected, address, status, isPending, error])
 
   return {
     address,
