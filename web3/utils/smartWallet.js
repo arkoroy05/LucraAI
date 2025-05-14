@@ -58,6 +58,48 @@ export async function createSmartWallet({ networkId = 'base-sepolia', privateKey
 }
 
 /**
+ * Safely access localStorage with fallback
+ * This helps prevent issues with service workers or other browser restrictions
+ */
+const safeLocalStorage = {
+  getItem: (key) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(key);
+      }
+      return null;
+    } catch (error) {
+      console.error('Error accessing localStorage.getItem:', error);
+      return null;
+    }
+  },
+  setItem: (key, value) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, value);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error accessing localStorage.setItem:', error);
+      return false;
+    }
+  },
+  removeItem: (key) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(key);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error accessing localStorage.removeItem:', error);
+      return false;
+    }
+  }
+};
+
+/**
  * Stores a Smart Wallet in local storage
  * @param {object} smartWallet - Smart Wallet object to store
  * @returns {boolean} - True if the Smart Wallet was stored successfully
@@ -65,8 +107,16 @@ export async function createSmartWallet({ networkId = 'base-sepolia', privateKey
 export function storeSmartWallet(smartWallet) {
   try {
     // Store the Smart Wallet in local storage
-    localStorage.setItem('lucra_smart_wallet', JSON.stringify(smartWallet));
-    return true;
+    const result = safeLocalStorage.setItem('lucra_smart_wallet', JSON.stringify(smartWallet));
+
+    // Verify the data was stored correctly
+    const verification = safeLocalStorage.getItem('lucra_smart_wallet');
+    if (!verification) {
+      console.warn('Smart Wallet storage verification failed');
+      return false;
+    }
+
+    return result;
   } catch (error) {
     console.error('Error storing Smart Wallet:', error);
     return false;
@@ -80,8 +130,20 @@ export function storeSmartWallet(smartWallet) {
 export function getStoredSmartWallet() {
   try {
     // Retrieve the Smart Wallet from local storage
-    const smartWallet = localStorage.getItem('lucra_smart_wallet');
-    return smartWallet ? JSON.parse(smartWallet) : null;
+    const smartWallet = safeLocalStorage.getItem('lucra_smart_wallet');
+
+    // Add additional logging for debugging
+    if (!smartWallet) {
+      console.log('No Smart Wallet found in localStorage');
+      return null;
+    }
+
+    try {
+      return JSON.parse(smartWallet);
+    } catch (parseError) {
+      console.error('Error parsing Smart Wallet JSON:', parseError);
+      return null;
+    }
   } catch (error) {
     console.error('Error retrieving Smart Wallet:', error);
     return null;
@@ -95,8 +157,7 @@ export function getStoredSmartWallet() {
 export function clearStoredSmartWallet() {
   try {
     // Clear the Smart Wallet from local storage
-    localStorage.removeItem('lucra_smart_wallet');
-    return true;
+    return safeLocalStorage.removeItem('lucra_smart_wallet');
   } catch (error) {
     console.error('Error clearing Smart Wallet:', error);
     return false;
@@ -110,7 +171,7 @@ export function clearStoredSmartWallet() {
 export function hasStoredSmartWallet() {
   try {
     // Check if a Smart Wallet is stored in local storage
-    return !!localStorage.getItem('lucra_smart_wallet');
+    return !!safeLocalStorage.getItem('lucra_smart_wallet');
   } catch (error) {
     console.error('Error checking for stored Smart Wallet:', error);
     return false;

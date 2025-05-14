@@ -76,7 +76,7 @@ async function parseUserMessage(message) {
 
     // Create a generative model instance
     // Use the correct model name for the current API version
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Define the system prompt to guide the model
     const systemPrompt = `

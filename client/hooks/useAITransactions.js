@@ -39,8 +39,8 @@ export function useAITransactions() {
         },
         body: JSON.stringify({
           messages: [{ role: 'user', content: message }],
-          walletAddress: address,
-          useTestnet,
+          walletAddress: address || '',
+          useTestnet: useTestnet || false,
         }),
       });
 

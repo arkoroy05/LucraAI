@@ -20,17 +20,17 @@ export async function prepareTransaction({ to, amount, token = 'ETH', network = 
   try {
     // Resolve the recipient address if it's a Base Name
     const resolvedTo = await resolveBaseName(to);
-    
+
     if (!resolvedTo) {
       throw new Error(`Could not resolve recipient address: ${to}`);
     }
-    
+
     // Parse the amount to wei
     const value = parseEther(amount.toString());
-    
+
     // Determine the network configuration
     const networkConfig = network.includes('sepolia') ? BASE_SEPOLIA : BASE_MAINNET;
-    
+
     // Prepare the transaction object
     const preparedTransaction = {
       to: resolvedTo,
@@ -38,7 +38,7 @@ export async function prepareTransaction({ to, amount, token = 'ETH', network = 
       token,
       network: networkConfig,
     };
-    
+
     return preparedTransaction;
   } catch (error) {
     console.error('Error preparing transaction:', error);
@@ -58,13 +58,13 @@ export async function prepareTransaction({ to, amount, token = 'ETH', network = 
 export function formatTransaction({ hash, to, value, network = BASE_MAINNET }) {
   try {
     // Format the amount from wei to ETH
-    const formattedValue = typeof value === 'bigint' 
-      ? formatEther(value) 
+    const formattedValue = typeof value === 'bigint'
+      ? formatEther(value)
       : formatEther(BigInt(value));
-    
+
     // Get the explorer URL for the transaction
     const explorerUrl = getExplorerUrl(hash, network);
-    
+
     // Format the transaction object
     const formattedTransaction = {
       hash,
@@ -73,7 +73,7 @@ export function formatTransaction({ hash, to, value, network = BASE_MAINNET }) {
       explorerUrl,
       network: network.name,
     };
-    
+
     return formattedTransaction;
   } catch (error) {
     console.error('Error formatting transaction:', error);
@@ -94,17 +94,23 @@ export function formatTransaction({ hash, to, value, network = BASE_MAINNET }) {
  * @param {string} transaction.note - Optional note for the transaction
  * @returns {Promise<boolean>} - True if the transaction was stored successfully
  */
-export async function storeTransaction({ 
-  hash, 
-  to, 
-  value, 
-  token = 'ETH', 
-  walletAddress, 
-  type = 'send', 
-  status = 'pending', 
-  note = '' 
+export async function storeTransaction({
+  hash,
+  to,
+  value,
+  token = 'ETH',
+  walletAddress,
+  type = 'send',
+  status = 'pending',
+  note = ''
 }) {
   try {
+    // Skip if no wallet address is provided
+    if (!walletAddress) {
+      console.log('No wallet address provided, skipping transaction storage');
+      return false;
+    }
+
     // Call the API to store the transaction
     const response = await fetch('/api/transactions/store', {
       method: 'POST',
@@ -112,21 +118,21 @@ export async function storeTransaction({
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        transactionHash: hash,
-        recipientAddress: to,
-        amount: value,
-        token,
+        transactionHash: hash || 'pending-' + Date.now(),
+        recipientAddress: to || 'unknown',
+        amount: value || '0',
+        token: token || 'ETH',
         walletAddress,
-        transactionType: type,
-        status,
-        note,
+        transactionType: type || 'send',
+        status: status || 'pending',
+        note: note || '',
       }),
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to store transaction: ${response.statusText}`);
     }
-    
+
     return true;
   } catch (error) {
     console.error('Error storing transaction:', error);

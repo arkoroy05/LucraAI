@@ -26,7 +26,9 @@ export function SmartWalletUI() {
   const handleCreateWallet = async () => {
     try {
       setIsCreating(true)
-      await createWallet()
+      console.log('Creating new Smart Wallet...')
+      const wallet = await createWallet()
+      console.log('Smart Wallet created successfully:', wallet?.address)
     } catch (error) {
       console.error('Error creating Smart Wallet:', error)
     } finally {
@@ -36,7 +38,13 @@ export function SmartWalletUI() {
 
   // Handle clearing the Smart Wallet
   const handleClearWallet = () => {
-    clearWallet()
+    try {
+      console.log('Clearing Smart Wallet...')
+      clearWallet()
+      console.log('Smart Wallet cleared successfully')
+    } catch (error) {
+      console.error('Error clearing Smart Wallet:', error)
+    }
   }
 
   // Get the explorer URL for the Smart Wallet

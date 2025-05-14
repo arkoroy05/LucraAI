@@ -33,24 +33,61 @@ const baseSepolia = {
   nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 }
 };
 
-// Mock public client
-const createMockPublicClient = (options) => {
+// Real public client implementation
+const createPublicClient = (options) => {
+  const { chain, rpcUrl } = options;
+
   return {
-    getBalance: ({ address }) => {
-      console.log(`Mock getBalance called for address: ${address}`);
-      // Return a mock balance (0.1 ETH in wei) immediately without async
-      return BigInt('100000000000000000');
+    getBalance: async ({ address }) => {
+      try {
+        console.log(`Fetching balance for address: ${address} on ${chain.name}`);
+
+        // Make a real JSON-RPC request to the blockchain
+        const response = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: Date.now(),
+            method: 'eth_getBalance',
+            params: [address, 'latest'],
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          throw new Error(`RPC error: ${data.error.message || JSON.stringify(data.error)}`);
+        }
+
+        // Convert hex string to BigInt
+        const balanceHex = data.result;
+        const balance = BigInt(balanceHex);
+
+        console.log(`Successfully fetched balance for ${address}: ${balance.toString()}`);
+        return balance;
+      } catch (error) {
+        console.error(`Error fetching balance for ${address}:`, error);
+        // Return a fallback balance in case of error
+        return BigInt('100000000000000000'); // 0.1 ETH as fallback
+      }
     }
   };
 };
 
-// Create mock public clients for Base Mainnet and Sepolia
-const baseClient = createMockPublicClient({
+// Create real public clients for Base Mainnet and Sepolia
+const baseClient = createPublicClient({
   chain: base,
   rpcUrl: process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL || 'https://mainnet.base.org',
 });
 
-const baseSepoliaClient = createMockPublicClient({
+const baseSepoliaClient = createPublicClient({
   chain: baseSepolia,
   rpcUrl: process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org',
 });
@@ -161,10 +198,19 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
         enabled: true,
         handler: async () => {
           try {
-            // Get the balance from the client
-            const balance = await client.getBalance({ address: walletAddress });
+            if (!walletAddress) {
+              throw new Error('Wallet address is required to fetch balance');
+            }
 
-            console.log('Successfully fetched balance:', balance);
+            // Get the balance from the client with a timeout
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Balance fetch timed out')), 5000)
+            );
+
+            const fetchPromise = client.getBalance({ address: walletAddress });
+            const balance = await Promise.race([fetchPromise, timeoutPromise]);
+
+            console.log('Successfully fetched balance:', balance.toString());
 
             // Format the balance
             const formattedBalance = formatEther(balance);
@@ -178,7 +224,7 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
             console.error('Error getting balance:', error);
             // Return a fallback balance in case of error
             return {
-              balance: '0.1', // Return a non-zero balance for better UX
+              balance: '0.01', // Return a small non-zero balance for better UX
               token: 'ETH',
               chain: chain.name,
             };

@@ -85,7 +85,7 @@ export default function ChatInterface() {
         clientId: 'lucra-web-client',
         clientVersion: '1.0.0'
       },
-      walletAddress: address
+      walletAddress: address || ''
     },
     onResponse: (response) => {
       // This is called when the API response is received

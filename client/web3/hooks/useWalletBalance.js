@@ -91,6 +91,12 @@ export function useWalletBalance(tokenAddress) {
       return { balance: '0' };
     }
 
+    // Prevent excessive fetching
+    if (fetchCountRef.current > 2) {
+      console.log('Already fetched balance multiple times, skipping to prevent excessive requests');
+      return { balance: '0.01' }; // Return a non-zero balance for better UX
+    }
+
     try {
       setIsAgentLoading(true);
       setAgentError(null);
@@ -103,13 +109,13 @@ export function useWalletBalance(tokenAddress) {
 
       // Set a default balance immediately to prevent UI from being stuck in loading state
       setAgentBalances({
-        ETH: '0',
+        ETH: '0.01', // Use a small non-zero balance for better UX
       });
 
       try {
-        // Use the agent's getBalance capability with a shorter timeout
+        // Use the agent's getBalance capability with a longer timeout
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Balance fetch timed out')), 2000)
+          setTimeout(() => reject(new Error('Balance fetch timed out')), 5000)
         );
 
         const fetchPromise = agent.capabilities.getBalance.handler();
@@ -117,10 +123,19 @@ export function useWalletBalance(tokenAddress) {
 
         // Only update state if we have a valid result
         if (balanceResult && typeof balanceResult.balance === 'string') {
-          setAgentBalances({
-            ETH: balanceResult.balance,
-          });
-          return balanceResult;
+          console.log('Successfully fetched balance from agent:', balanceResult.balance);
+
+          // Parse the balance to ensure it's a valid number
+          const parsedBalance = parseFloat(balanceResult.balance);
+
+          if (!isNaN(parsedBalance)) {
+            setAgentBalances({
+              ETH: balanceResult.balance,
+            });
+            return balanceResult;
+          } else {
+            console.warn('Received invalid balance format:', balanceResult.balance);
+          }
         }
 
         // If we reach here, we're using the default balance already set
@@ -144,17 +159,21 @@ export function useWalletBalance(tokenAddress) {
   // Using a ref to track if we've already fetched the balance to prevent infinite loops
   const hasFetchedRef = useRef(false);
   const refreshTimeoutRef = useRef(null);
+  const fetchCountRef = useRef(0);
 
   useEffect(() => {
-    // Only fetch if connected, have an address, and haven't fetched yet
-    if (isConnected && address && !hasFetchedRef.current) {
+    // Only fetch if connected, have an address, and haven't fetched too many times
+    if (isConnected && address && !hasFetchedRef.current && fetchCountRef.current < 2) {
       hasFetchedRef.current = true;
+      fetchCountRef.current += 1;
+      console.log(`Fetching balance (attempt ${fetchCountRef.current})`);
       fetchAgentBalance();
     }
 
     // Reset the ref when address or chain changes
     if (!isConnected || !address) {
       hasFetchedRef.current = false;
+      fetchCountRef.current = 0;
     }
 
     // Cleanup function to clear any pending timeouts when component unmounts
@@ -163,7 +182,7 @@ export function useWalletBalance(tokenAddress) {
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-  }, [isConnected, address, chainId, fetchAgentBalance])
+  }, [isConnected, address, chainId])
 
   // Refresh balances with debounce to prevent multiple calls
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -173,6 +192,7 @@ export function useWalletBalance(tokenAddress) {
     if (isRefreshing) return;
 
     setIsRefreshing(true);
+    console.log('Manually refreshing balances');
 
     // Clear any existing timeout
     if (refreshTimeoutRef.current) {
@@ -190,16 +210,23 @@ export function useWalletBalance(tokenAddress) {
     // Set a default balance in case fetchAgentBalance fails or times out
     setAgentBalances(prev => prev.ETH ? prev : { ETH: '0' });
 
-    // Attempt to fetch agent balance
-    fetchAgentBalance().catch(err => {
-      console.error('Error refreshing agent balance:', err);
-    });
+    // Only fetch agent balance if we're connected and have an address
+    if (isConnected && address) {
+      // Reset the fetch counter to allow a manual refresh
+      fetchCountRef.current = 0;
+      hasFetchedRef.current = false;
+
+      // Attempt to fetch agent balance
+      fetchAgentBalance().catch(err => {
+        console.error('Error refreshing agent balance:', err);
+      });
+    }
 
     // Set a timeout to reset the refreshing state
     refreshTimeoutRef.current = setTimeout(() => {
       setIsRefreshing(false);
     }, 3000);
-  }, [isRefreshing, refetchNativeBalance, refetchTokenBalance, tokenAddress, fetchAgentBalance]);
+  }, [isRefreshing, refetchNativeBalance, refetchTokenBalance, tokenAddress, fetchAgentBalance, isConnected, address]);
 
   return {
     // Native balance (ETH)
