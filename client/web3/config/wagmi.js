@@ -4,6 +4,32 @@ import { http, createConfig } from 'wagmi'
 import { base, mainnet } from 'wagmi/chains'
 import { injected, metaMask, walletConnect, coinbaseWallet } from 'wagmi/connectors'
 
+// Define Base Sepolia testnet
+const baseSepolia = {
+  id: 84532,
+  name: 'Base Sepolia',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Sepolia Ether',
+    symbol: 'ETH',
+  },
+  rpcUrls: {
+    default: {
+      http: [process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org'],
+    },
+    public: {
+      http: [process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org'],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: 'BaseScan',
+      url: 'https://sepolia.basescan.org',
+    },
+  },
+  testnet: true,
+}
+
 // Get WalletConnect project ID from environment variable
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '9f9310517adea17021a541eca3140522'
 
@@ -12,7 +38,7 @@ console.log('WalletConnect Project ID:', projectId ? 'Configured' : 'Missing')
 
 // Create the Wagmi configuration
 export const config = createConfig({
-  chains: [mainnet, base],
+  chains: [base, baseSepolia, mainnet],
   connectors: [
     injected({
       shimDisconnect: true,
@@ -49,6 +75,25 @@ export const config = createConfig({
   ],
   transports: {
     [mainnet.id]: http(),
-    [base.id]: http(),
+    [base.id]: http({
+      batch: { batchSize: 1 },
+      fetchOptions: {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+      retryCount: 3,
+      retryDelay: 1000,
+    }),
+    [baseSepolia.id]: http({
+      batch: { batchSize: 1 },
+      fetchOptions: {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+      retryCount: 3,
+      retryDelay: 1000,
+    }),
   },
 })

@@ -1,0 +1,46 @@
+{
+  "name": "lucra-ai-web3",
+  "version": "1.0.0",
+  "description": "Web3 integration for LucraAI",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy:sepolia": "hardhat run scripts/deploy-wallet.js --network base-sepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy-wallet.js --network base-mainnet",
+    "verify": "hardhat verify",
+    "clean": "hardhat clean",
+    "node": "hardhat node",
+    "coverage": "hardhat coverage"
+  },
+  "keywords": [
+    "ethereum",
+    "base",
+    "smart-contracts",
+    "wallet",
+    "lucra-ai"
+  ],
+  "author": "LucraAI Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^1.0.6",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "@nomiclabs/hardhat-etherscan": "^3.1.7",
+    "@typechain/ethers-v5": "^10.2.1",
+    "@typechain/hardhat": "^6.1.6",
+    "chai": "^4.3.7",
+    "dotenv": "^16.3.1",
+    "ethers": "^5.7.2",
+    "hardhat": "^2.17.1",
+    "hardhat-gas-reporter": "^1.0.9",
+    "solidity-coverage": "^0.8.4",
+    "typechain": "^8.3.1"
+  },
+  "dependencies": {
+    "@coinbase/agentkit": "^0.7.1",
+    "@openzeppelin/contracts": "^5.0.0",
+    "viem": "^2.29.2"
+  }
+}

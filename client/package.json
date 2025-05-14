@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@coinbase/onchainkit": "^0.38.10",
+    "@coinbase/agentkit": "^0.7.1",
+    "@coinbase/agentkit-vercel-ai-sdk": "^0.1.0",
+    "@coinbase/onchainkit": "^0.38.13",
     "@google/generative-ai": "^0.24.1",
     "@radix-ui/react-accordion": "^1.2.8",
     "@radix-ui/react-avatar": "^1.1.7",
@@ -29,7 +31,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.2.0",
-    "viem": "^2.28.3",
+    "viem": "^2.29.2",
     "wagmi": "^2.15.2"
   },
   "devDependencies": {

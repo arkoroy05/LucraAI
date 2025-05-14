@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useTransactions } from '../hooks/useTransactions'
+import { formatAddressOrName } from '../../../web3'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, Check, AlertCircle } from 'lucide-react'
@@ -15,14 +16,18 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
   const [isExecuting, setIsExecuting] = useState(false)
   const [isUpdatingDb, setIsUpdatingDb] = useState(false)
   const { address } = useAccount()
+  // Get transaction functions and state
+  const transactions = useTransactions()
   const {
     sendPayment,
     splitPayment,
     hash,
     isPending,
     isConfirming,
-    isConfirmed
-  } = useTransactions()
+    isConfirmed,
+    getExplorerUrl,
+    network
+  } = transactions
 
   // Update transaction status in Supabase when transaction status changes
   useEffect(() => {
@@ -172,7 +177,11 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
               size="sm"
               variant="ghost"
               className="text-purple-400 hover:text-purple-300 gap-1"
-              onClick={() => window.open(`https://etherscan.io/tx/${hash}`, '_blank')}
+              onClick={() => {
+                // Get the explorer URL based on the network
+                const explorerUrl = getExplorerUrl();
+                window.open(explorerUrl, '_blank');
+              }}
             >
               View
               <ArrowUpRight className="h-3 w-3" />

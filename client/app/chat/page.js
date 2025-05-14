@@ -9,13 +9,14 @@ import { useChat } from "ai/react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { motion, AnimatePresence } from "framer-motion"
-import { ConnectWallet, AccountInfo, TransactionUI, useWalletConnection } from "@/web3"
+import { ConnectWallet, AccountInfo, TransactionUI, SmartWalletUI, useWalletConnection } from "@/web3"
 import { useAccount } from "wagmi"
 import { storeWalletAddress } from "@/utils/supabase"
 import ChatHistory from "@/components/ChatHistory"
 import TransactionHistory from "@/components/TransactionHistory"
 import { useWalletBalance } from "@/web3/hooks/useWalletBalance"
 import { formatTokenAmount } from "@/web3/utils/balanceUtils"
+import { useAITransactions } from "@/hooks/useAITransactions"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -54,6 +55,7 @@ function useWindowSize() {
 
 export default function ChatInterface() {
   const { address, isConnected } = useAccount()
+  const { isConnected: isWalletConnected } = useWalletConnection()
   const [activeTab, setActiveTab] = useState('chat') // 'chat', 'history', 'transactions'
   const {
     nativeDisplayBalance,
@@ -171,7 +173,7 @@ export default function ChatInterface() {
             }
 
             // Update the transaction UI based on the parsed data
-            if (parsedData.intent === 'send' || parsedData.intent === 'split') {
+            if (parsedData && (parsedData.intent === 'send' || parsedData.intent === 'split')) {
               transactionUI.innerHTML = `
                 <div class="flex justify-between items-center mb-2">
                   <span class="text-white/60">
@@ -212,6 +214,103 @@ export default function ChatInterface() {
     // Clean up
     return () => {
       document.removeEventListener('message-updated', handleMessageUpdate);
+    };
+  }, []);
+
+  // Add event listener for AI transactions
+  useEffect(() => {
+    const handleAITransaction = (event) => {
+      const { userMessage, aiResponse, transactionDetails } = event.detail;
+
+      // Add the messages to the DOM
+      const chatContainer = document.querySelector('.chat-messages');
+      if (chatContainer) {
+        // Create user message element
+        const userMessageEl = document.createElement('div');
+        userMessageEl.className = 'message user-message mb-6';
+        userMessageEl.setAttribute('data-message-id', userMessage.id);
+        userMessageEl.setAttribute('data-role', 'user');
+        userMessageEl.innerHTML = `
+          <div class="flex items-start gap-4">
+            <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </div>
+            <div class="flex-1">
+              <div class="message-content prose prose-invert">
+                <p>${userMessage.content}</p>
+              </div>
+            </div>
+          </div>
+        `;
+        chatContainer.appendChild(userMessageEl);
+
+        // Create AI response element
+        const aiMessageEl = document.createElement('div');
+        aiMessageEl.className = 'message ai-message mb-6';
+        aiMessageEl.setAttribute('data-message-id', aiResponse.id);
+        aiMessageEl.setAttribute('data-role', 'assistant');
+        aiMessageEl.innerHTML = `
+          <div class="flex items-start gap-4">
+            <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 8V4H8"></path>
+                <rect width="16" height="12" x="4" y="8" rx="2"></rect>
+                <path d="M2 14h2"></path>
+                <path d="M20 14h2"></path>
+                <path d="M15 13v2"></path>
+                <path d="M9 13v2"></path>
+              </svg>
+            </div>
+            <div class="flex-1">
+              <div class="message-content prose prose-invert">
+                <p>${aiResponse.content}</p>
+              </div>
+              <div class="transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-white/60">
+                    ${transactionDetails.type === "send" ? "Transaction" : "Split Payment"}
+                  </span>
+                  <span class="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full">
+                    Processing
+                  </span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-white font-medium">
+                    ${transactionDetails.amount} ${transactionDetails.token || "ETH"} to
+                    ${transactionDetails.type === "split"
+                      ? transactionDetails.recipients.map(r => `@${r}`).join(", ")
+                      : `@${transactionDetails.recipient}`}
+                  </span>
+                  <div>
+                    <button class="text-purple-400 hover:text-purple-300 gap-1 text-sm px-2 py-1 bg-transparent">
+                      Execute
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block">
+                        <path d="M7 17L17 7"></path>
+                        <path d="M7 7h10v10"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        chatContainer.appendChild(aiMessageEl);
+
+        // Scroll to the bottom
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    };
+
+    // Add the event listener
+    document.addEventListener('ai-transaction', handleAITransaction);
+
+    // Clean up
+    return () => {
+      document.removeEventListener('ai-transaction', handleAITransaction);
     };
   }, []);
 
@@ -271,8 +370,16 @@ export default function ChatInterface() {
     handleInputChange({ target: { value: newInput } });
   }
 
+  // Get AI transaction functions
+  const {
+    processMessage,
+    isTransactionRequest,
+    isProcessing: isAIProcessing,
+    error: aiError
+  } = useAITransactions();
+
   // Custom submit handler to ensure proper form submission
-  const customSubmit = (e) => {
+  const customSubmit = async (e) => {
     if (e && e.preventDefault) {
       e.preventDefault();
     }
@@ -281,7 +388,53 @@ export default function ChatInterface() {
       return;
     }
 
-    // Call the handleSubmit function from useChat
+    const userMessage = input.trim();
+
+    // Check if this appears to be a transaction request
+    if (isConnected && isTransactionRequest(userMessage)) {
+      try {
+        // Process the message with our AI transaction handler
+        const result = await processMessage(userMessage);
+
+        // If this was processed as a transaction, add it to the chat
+        if (result.type === 'transaction') {
+          // Add the user message to the chat
+          const userMessageObj = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: userMessage,
+          };
+
+          // Add the AI response to the chat
+          const aiResponseObj = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: result.agentResponse.response || 'Transaction processed successfully.',
+          };
+
+          // Clear the input
+          setInput('');
+
+          // Update the messages array
+          // Since we can't directly modify the messages array from useChat,
+          // we'll add a custom event to handle this
+          document.dispatchEvent(new CustomEvent('ai-transaction', {
+            detail: {
+              userMessage: userMessageObj,
+              aiResponse: aiResponseObj,
+              transactionDetails: result.details
+            }
+          }));
+
+          return;
+        }
+      } catch (error) {
+        console.error('Error processing transaction:', error);
+        // Fall back to regular chat if transaction processing fails
+      }
+    }
+
+    // Call the handleSubmit function from useChat for non-transaction messages
     handleSubmit(e);
   }
 
@@ -315,121 +468,80 @@ export default function ChatInterface() {
       </div>
 
       {/* Top Navigation */}
-      <motion.div
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ type: "spring", damping: 20 }}
-        className="absolute top-0 left-0 right-0 h-16 bg-black/10 backdrop-blur-lg border-b border-white/10 z-50"
-      >
+      <div className="absolute top-0 left-0 right-0 h-16 bg-black/10 backdrop-blur-lg border-b border-white/10 z-50">
         <div className="flex items-center justify-between h-full px-6">
           <div className="flex items-center gap-6">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+            <button
               onClick={toggleSidebar}
               className="md:hidden p-2 rounded-lg hover:bg-white/5 transition-colors"
             >
               <Menu className="h-5 w-5 text-white" />
-            </motion.button>
-            <motion.span
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2 }}
-              className="font-light tracking-tight text-white text-xl"
-            >
+            </button>
+            <span className="font-light tracking-tight text-white text-xl">
               lucra<span className="font-semibold">AI</span>
-            </motion.span>
+            </span>
           </div>
           <div className="flex items-center gap-4">
-            <motion.div whileHover={{ scale: 1.05 }}>
-              <Button variant="ghost" className="text-white/60 hover:text-white text-sm">
-                Member Perks
-              </Button>
-            </motion.div>
+            <Button variant="ghost" className="text-white/60 hover:text-white text-sm">
+              Member Perks
+            </Button>
             <ConnectWallet />
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Sidebar */}
-      <AnimatePresence>
-        {(!isMobile || isSidebarOpen) && (
-          <motion.div
-            variants={slideIn}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={{ type: "spring", damping: 20 }}
-            className={cn(
-              "fixed inset-y-0 left-0 w-72 transform duration-300 ease-out z-40",
-              "bg-black/20 backdrop-blur-xl border-r border-white/10",
-              "md:translate-x-0 mt-16"
-            )}
-          >
-            <div className="p-6">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="space-y-8"
-              >
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Wallet</h3>
-                  <AccountInfo />
+      {(!isMobile || isSidebarOpen) && (
+        <div
+          className={cn(
+            "fixed inset-y-0 left-0 w-72 transform duration-300 ease-out z-40",
+            "bg-black/20 backdrop-blur-xl border-r border-white/10",
+            "md:translate-x-0 mt-16"
+          )}
+        >
+          <div className="p-6">
+            <div className="space-y-8">
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Wallet</h3>
+                <AccountInfo />
+                {isWalletConnected && <SmartWalletUI />}
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Navigation</h3>
+                <div className="space-y-1">
+                  <button
+                    className={`w-full p-3 text-left text-sm ${activeTab === 'chat' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
+                    onClick={() => setActiveTab('chat')}
+                  >
+                    Chat
+                  </button>
+
+                  <button
+                    className={`w-full p-3 text-left text-sm ${activeTab === 'history' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
+                    onClick={() => setActiveTab('history')}
+                  >
+                    Chat History
+                  </button>
+
+                  <button
+                    className={`w-full p-3 text-left text-sm ${activeTab === 'transactions' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
+                    onClick={() => setActiveTab('transactions')}
+                  >
+                    Transaction History
+                  </button>
+
+                  <button
+                    className="w-full p-3 text-left text-sm text-white/80 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                  >
+                    Settings
+                  </button>
                 </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Navigation</h3>
-                  <div className="space-y-1">
-                    <motion.button
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.1 }}
-                      whileHover={{ scale: 1.02, x: 5 }}
-                      className={`w-full p-3 text-left text-sm ${activeTab === 'chat' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
-                      onClick={() => setActiveTab('chat')}
-                    >
-                      Chat
-                    </motion.button>
-
-                    <motion.button
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.2 }}
-                      whileHover={{ scale: 1.02, x: 5 }}
-                      className={`w-full p-3 text-left text-sm ${activeTab === 'history' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
-                      onClick={() => setActiveTab('history')}
-                    >
-                      Chat History
-                    </motion.button>
-
-                    <motion.button
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.3 }}
-                      whileHover={{ scale: 1.02, x: 5 }}
-                      className={`w-full p-3 text-left text-sm ${activeTab === 'transactions' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
-                      onClick={() => setActiveTab('transactions')}
-                    >
-                      Transaction History
-                    </motion.button>
-
-                    <motion.button
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.4 }}
-                      whileHover={{ scale: 1.02, x: 5 }}
-                      className="w-full p-3 text-left text-sm text-white/80 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                    >
-                      Settings
-                    </motion.button>
-                  </div>
-                </div>
-              </motion.div>
+              </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col md:ml-72 mt-16 relative z-10">
@@ -510,14 +622,10 @@ export default function ChatInterface() {
                 </AnimatePresence>
 
                 {/* Messages */}
-                <div className="flex-1 space-y-6">
-                  <AnimatePresence>
+                <div className="flex-1 space-y-6 chat-messages">
                     {messages.map((message) => (
-                      <motion.div
+                      <div
                         key={message.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
                         className={cn(
                           "flex",
                           message.role === "user" ? "justify-end" : "justify-start"
@@ -525,31 +633,24 @@ export default function ChatInterface() {
                         data-message-id={message.id}
                         data-role={message.role}
                       >
-                        <motion.div
-                          initial={{ scale: 0.8 }}
-                          animate={{ scale: 1 }}
+                        <div
                           className={cn(
                             "flex items-start max-w-[80%] gap-4",
                             message.role === "user" ? "flex-row-reverse" : "flex-row"
                           )}
                         >
-                          <motion.div whileHover={{ scale: 1.1 }}>
-                            <Avatar
-                              className={cn(
-                                "h-10 w-10 border border-white/10 ring-2 ring-white/10",
-                                message.role === "user" ? "bg-purple-500/80" : "bg-white/10"
-                              )}
-                            >
-                              <div className="flex items-center justify-center h-full text-white text-sm font-medium">
-                                {message.role === "user" ? "U" : "AI"}
-                              </div>
-                            </Avatar>
-                          </motion.div>
+                          <Avatar
+                            className={cn(
+                              "h-10 w-10 border border-white/10 ring-2 ring-white/10",
+                              message.role === "user" ? "bg-purple-500/80" : "bg-white/10"
+                            )}
+                          >
+                            <div className="flex items-center justify-center h-full text-white text-sm font-medium">
+                              {message.role === "user" ? "U" : "AI"}
+                            </div>
+                          </Avatar>
 
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ type: "spring", damping: 20 }}
+                          <div
                             className={cn(
                               "rounded-2xl p-5 text-sm leading-relaxed message-content",
                               message.role === "user"
@@ -569,72 +670,48 @@ export default function ChatInterface() {
                                 <TransactionUI parsedData={message.parsedData} transactionId={message.id} />
                               ) : (
                                 message.content && message.content.includes && message.content.includes("transaction") && (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: 0.2 }}
+                                  <div
                                     className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
                                   >
                                     <div className="flex justify-between items-center mb-2">
                                       <span className="text-white/60">Transaction</span>
-                                      <motion.span
-                                        animate={{ scale: [1, 1.05, 1] }}
-                                        transition={{ repeat: Infinity, duration: 2 }}
+                                      <span
                                         className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
                                       >
                                         Pending
-                                      </motion.span>
+                                      </span>
                                     </div>
                                     <div className="flex justify-between items-center">
-                                      <span className="text-white font-medium">0.1 ETH to Alex</span>
-                                      <motion.div whileHover={{ scale: 1.05 }}>
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          className="text-purple-400 hover:text-purple-300 gap-1"
-                                        >
-                                          View
-                                          <ArrowUpRight className="h-3 w-3" />
-                                        </Button>
-                                      </motion.div>
+                                      <span className="text-white font-medium">ETH to recipient</span>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="text-purple-400 hover:text-purple-300 gap-1"
+                                      >
+                                        View
+                                        <ArrowUpRight className="h-3 w-3" />
+                                      </Button>
                                     </div>
-                                  </motion.div>
+                                  </div>
                                 )
                               )
                             )}
-                          </motion.div>
-                        </motion.div>
-                      </motion.div>
+                          </div>
+                        </div>
+                      </div>
                     ))}
-                  </AnimatePresence>
                 </div>
                 <div ref={messagesEndRef} />
 
                 {/* Input area */}
-                <motion.div
-                  initial={{ y: 100 }}
-                  animate={{ y: 0 }}
-                  transition={{ type: "spring", damping: 20 }}
-                  className="sticky bottom-6 mt-6"
-                >
+                <div className="sticky bottom-6 mt-6">
                   <Card className="backdrop-blur-xl bg-white/10 border-white/20 overflow-hidden">
                     <div className="flex flex-col gap-2">
                       {/* Suggestion chips */}
                       {suggestions.length > 0 && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex flex-wrap gap-2 px-4 pb-2"
-                        >
+                        <div className="flex flex-wrap gap-2 px-4 pb-2">
                           {suggestions.map((suggestion, index) => (
-                            <motion.div
-                              key={suggestion}
-                              initial={{ opacity: 0, scale: 0.8 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              transition={{ delay: index * 0.1 }}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
-                            >
+                            <div key={suggestion}>
                               <Button
                                 type="button"
                                 variant="outline"
@@ -644,28 +721,26 @@ export default function ChatInterface() {
                               >
                                 {suggestion}
                               </Button>
-                            </motion.div>
+                            </div>
                           ))}
-                        </motion.div>
+                        </div>
                       )}
 
                       <form onSubmit={customSubmit} className="flex items-center gap-4 p-4">
-                        <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className={cn(
-                              "rounded-xl h-10 w-10 transition-all duration-300",
-                              isRecording
-                                ? "text-red-400 bg-red-500/20 hover:bg-red-500/30 ring-4 ring-red-500/20"
-                                : "text-white/60 hover:text-white hover:bg-white/10"
-                            )}
-                            onClick={toggleRecording}
-                          >
-                            <Mic className="h-5 w-5" />
-                          </Button>
-                        </motion.div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            "rounded-xl h-10 w-10 transition-all duration-300",
+                            isRecording
+                              ? "text-red-400 bg-red-500/20 hover:bg-red-500/30 ring-4 ring-red-500/20"
+                              : "text-white/60 hover:text-white hover:bg-white/10"
+                          )}
+                          onClick={toggleRecording}
+                        >
+                          <Mic className="h-5 w-5" />
+                        </Button>
 
                         <Input
                           value={input}
@@ -682,28 +757,23 @@ export default function ChatInterface() {
                           }}
                         />
 
-                        <motion.div
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
+                        <Button
+                          type="submit"
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            "rounded-xl h-10 w-10 transition-all duration-300",
+                            "text-white/60 hover:text-white hover:bg-white/10"
+                          )}
+                          disabled={isLoading || input.trim() === ""}
                           style={{ opacity: isLoading || input.trim() === "" ? 0.5 : 1 }}
                         >
-                          <Button
-                            type="submit"
-                            variant="ghost"
-                            size="icon"
-                            className={cn(
-                              "rounded-xl h-10 w-10 transition-all duration-300",
-                              "text-white/60 hover:text-white hover:bg-white/10"
-                            )}
-                            disabled={isLoading || input.trim() === ""}
-                          >
-                            <Send className="h-5 w-5" />
-                          </Button>
-                        </motion.div>
+                          <Send className="h-5 w-5" />
+                        </Button>
                       </form>
                     </div>
                   </Card>
-                </motion.div>
+                </div>
               </motion.div>
             )}
 

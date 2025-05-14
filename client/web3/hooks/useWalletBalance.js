@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useAccount, useBalance, useReadContract } from 'wagmi'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useAccount, useBalance, useReadContract, useChainId } from 'wagmi'
 import { formatBalance, formatTokenAmount } from '../utils/balanceUtils'
+import { getNetworkByChainId, BASE_SEPOLIA } from '../../../web3'
+import { createTransactionAgent } from '../../../web3/utils/agentKit'
 
 /**
  * Custom hook to fetch wallet balances
@@ -11,12 +13,20 @@ import { formatBalance, formatTokenAmount } from '../utils/balanceUtils'
  */
 export function useWalletBalance(tokenAddress) {
   const { address, isConnected } = useAccount()
+  const chainId = useChainId()
   const [formattedBalance, setFormattedBalance] = useState('0')
   const [formattedNativeBalance, setFormattedNativeBalance] = useState('0')
   const [balances, setBalances] = useState({})
-  
+  const [agentBalances, setAgentBalances] = useState({})
+  const [isAgentLoading, setIsAgentLoading] = useState(false)
+  const [agentError, setAgentError] = useState(null)
+
+  // Determine if we're using the testnet
+  const network = getNetworkByChainId(chainId)
+  const useTestnet = network?.id === BASE_SEPOLIA.id
+
   // Fetch native token balance (ETH)
-  const { 
+  const {
     data: nativeBalance,
     isLoading: isNativeBalanceLoading,
     error: nativeBalanceError,
@@ -25,9 +35,9 @@ export function useWalletBalance(tokenAddress) {
     address,
     enabled: isConnected && !!address,
   })
-  
+
   // Fetch ERC20 token balance if tokenAddress is provided
-  const { 
+  const {
     data: tokenBalance,
     isLoading: isTokenBalanceLoading,
     error: tokenBalanceError,
@@ -37,7 +47,7 @@ export function useWalletBalance(tokenAddress) {
     token: tokenAddress,
     enabled: isConnected && !!address && !!tokenAddress,
   })
-  
+
   // Format balances when they change
   useEffect(() => {
     if (nativeBalance) {
@@ -53,7 +63,7 @@ export function useWalletBalance(tokenAddress) {
         }
       }))
     }
-    
+
     if (tokenBalance) {
       const formatted = formatBalance(tokenBalance.value, tokenBalance.decimals)
       setFormattedBalance(formatted)
@@ -68,15 +78,129 @@ export function useWalletBalance(tokenAddress) {
       }))
     }
   }, [nativeBalance, tokenBalance, tokenAddress])
-  
-  // Refresh balances
-  const refreshBalances = () => {
-    refetchNativeBalance()
-    if (tokenAddress) {
-      refetchTokenBalance()
+
+  /**
+   * Fetch the wallet balance using AgentKit
+   */
+  const fetchAgentBalance = useCallback(async () => {
+    if (!isConnected || !address) {
+      // Set a default balance if not connected
+      setAgentBalances({
+        ETH: '0',
+      });
+      return { balance: '0' };
     }
-  }
-  
+
+    try {
+      setIsAgentLoading(true);
+      setAgentError(null);
+
+      // Create an agent for handling the balance request
+      const agent = createTransactionAgent({
+        useTestnet,
+        walletAddress: address
+      });
+
+      // Set a default balance immediately to prevent UI from being stuck in loading state
+      setAgentBalances({
+        ETH: '0',
+      });
+
+      try {
+        // Use the agent's getBalance capability with a shorter timeout
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Balance fetch timed out')), 2000)
+        );
+
+        const fetchPromise = agent.capabilities.getBalance.handler();
+        const balanceResult = await Promise.race([fetchPromise, timeoutPromise]);
+
+        // Only update state if we have a valid result
+        if (balanceResult && typeof balanceResult.balance === 'string') {
+          setAgentBalances({
+            ETH: balanceResult.balance,
+          });
+          return balanceResult;
+        }
+
+        // If we reach here, we're using the default balance already set
+        return { balance: '0' };
+      } catch (innerError) {
+        console.error('Error or timeout in getBalance handler:', innerError);
+        // We already set a default balance above, so no need to set it again
+        return { balance: '0' };
+      }
+    } catch (error) {
+      console.error('Error fetching wallet balance with AgentKit:', error);
+      setAgentError('Failed to fetch wallet balance');
+      // We already set a default balance above, so no need to set it again
+      return { balance: '0' };
+    } finally {
+      setIsAgentLoading(false);
+    }
+  }, [address, isConnected, useTestnet])
+
+  // Fetch agent balance when dependencies change
+  // Using a ref to track if we've already fetched the balance to prevent infinite loops
+  const hasFetchedRef = useRef(false);
+  const refreshTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    // Only fetch if connected, have an address, and haven't fetched yet
+    if (isConnected && address && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchAgentBalance();
+    }
+
+    // Reset the ref when address or chain changes
+    if (!isConnected || !address) {
+      hasFetchedRef.current = false;
+    }
+
+    // Cleanup function to clear any pending timeouts when component unmounts
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [isConnected, address, chainId, fetchAgentBalance])
+
+  // Refresh balances with debounce to prevent multiple calls
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refreshBalances = useCallback(() => {
+    // Prevent multiple refreshes in quick succession
+    if (isRefreshing) return;
+
+    setIsRefreshing(true);
+
+    // Clear any existing timeout
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+
+    // Refresh native balance
+    refetchNativeBalance();
+
+    // Refresh token balance if available
+    if (tokenAddress) {
+      refetchTokenBalance();
+    }
+
+    // Set a default balance in case fetchAgentBalance fails or times out
+    setAgentBalances(prev => prev.ETH ? prev : { ETH: '0' });
+
+    // Attempt to fetch agent balance
+    fetchAgentBalance().catch(err => {
+      console.error('Error refreshing agent balance:', err);
+    });
+
+    // Set a timeout to reset the refreshing state
+    refreshTimeoutRef.current = setTimeout(() => {
+      setIsRefreshing(false);
+    }, 3000);
+  }, [isRefreshing, refetchNativeBalance, refetchTokenBalance, tokenAddress, fetchAgentBalance]);
+
   return {
     // Native balance (ETH)
     nativeBalance: nativeBalance?.value,
@@ -85,7 +209,7 @@ export function useWalletBalance(tokenAddress) {
     nativeDisplayBalance: nativeBalance ? `${formattedNativeBalance} ${nativeBalance.symbol}` : '0 ETH',
     isNativeBalanceLoading,
     nativeBalanceError,
-    
+
     // Token balance (if tokenAddress provided)
     tokenBalance: tokenBalance?.value,
     formattedBalance,
@@ -93,13 +217,21 @@ export function useWalletBalance(tokenAddress) {
     displayBalance: tokenBalance ? `${formattedBalance} ${tokenBalance.symbol}` : null,
     isTokenBalanceLoading,
     tokenBalanceError,
-    
+
     // All balances
     balances,
-    
+
+    // AgentKit balances
+    agentBalances,
+    agentDisplayBalance: agentBalances.ETH ? `${agentBalances.ETH} ETH` : '0 ETH',
+    isAgentLoading,
+    agentError,
+    fetchAgentBalance,
+
     // Utilities
     refreshBalances,
-    isLoading: isNativeBalanceLoading || isTokenBalanceLoading,
-    hasError: !!nativeBalanceError || !!tokenBalanceError
+    isRefreshing,
+    isLoading: isNativeBalanceLoading || isTokenBalanceLoading || isAgentLoading || isRefreshing,
+    hasError: !!nativeBalanceError || !!tokenBalanceError || !!agentError
   }
 }
