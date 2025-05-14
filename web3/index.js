@@ -20,7 +20,7 @@ export {
   lookupBaseName,
   isBaseName,
   formatAddressOrName
-} from './utils/baseName';
+} from './utils/baseNameResolver';
 
 // Export Smart Wallet utilities
 export {

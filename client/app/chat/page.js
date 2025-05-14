@@ -64,15 +64,27 @@ export default function ChatInterface() {
     isLoading: isBalanceLoading
   } = useWalletBalance()
 
+  // Ref to track if we've already refreshed balances
+  const hasRefreshedRef = useRef(false);
+
   // Store wallet address in Supabase when connected
   useEffect(() => {
     if (isConnected && address) {
+      // Store wallet address in Supabase
       storeWalletAddress(address, 'wagmi')
         .then(() => console.log('Wallet address stored in Supabase'))
         .catch(err => console.error('Error storing wallet address:', err))
 
-      // Refresh balances when wallet is connected
-      refreshBalances()
+      // Refresh balances when wallet is connected, but only once
+      if (!hasRefreshedRef.current) {
+        hasRefreshedRef.current = true;
+        console.log('Initial balance refresh on wallet connect');
+
+        // Add a small delay to prevent race conditions
+        setTimeout(() => {
+          refreshBalances();
+        }, 500);
+      }
     }
   }, [isConnected, address, refreshBalances])
 

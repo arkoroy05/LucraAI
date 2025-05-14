@@ -3,8 +3,9 @@
 import { useAccount } from 'wagmi'
 import { Card } from '@/components/ui/card'
 import { motion } from 'framer-motion'
-import { Wallet, RefreshCw } from 'lucide-react'
+import { Wallet, RefreshCw, Tag } from 'lucide-react'
 import { useWalletBalance } from '../hooks/useWalletBalance'
+import { useBaseName } from '../hooks/useBaseName'
 import { formatAddress } from '../utils/balanceUtils'
 import { useEffect, useState } from 'react'
 
@@ -20,6 +21,11 @@ export function AccountInfo() {
     refreshBalances,
     agentBalances
   } = useWalletBalance()
+
+  const {
+    baseName,
+    isLoading: isBaseNameLoading
+  } = useBaseName()
 
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [displayBalance, setDisplayBalance] = useState('0 ETH')
@@ -68,8 +74,14 @@ export function AccountInfo() {
             <Wallet className="h-4 w-4 text-purple-400" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-white">
+            <span className="text-sm font-medium text-white flex items-center gap-1">
               Wallet
+              {baseName && (
+                <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                  <Tag className="h-2.5 w-2.5" />
+                  {baseName}
+                </span>
+              )}
             </span>
             <span className="text-xs text-white/60 truncate max-w-[100px]">
               {address ? formatAddress(address) : ''}

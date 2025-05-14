@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useWalletConnection } from '../hooks/useWalletConnection'
+import { useWalletSigning } from '../hooks/useWalletSigning'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
-import { Wallet, X } from 'lucide-react'
+import { Wallet, X, CheckCircle, AlertCircle } from 'lucide-react'
 
 /**
  * ConnectWallet component that provides a button to connect wallet
@@ -14,6 +15,7 @@ export function ConnectWallet() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
   const [connectionError, setConnectionError] = useState(null)
+  const [showSigningPrompt, setShowSigningPrompt] = useState(false)
   const {
     isConnected,
     address,
@@ -25,6 +27,14 @@ export function ConnectWallet() {
     connectCoinbaseWallet,
     disconnect
   } = useWalletConnection()
+
+  const {
+    verifyWalletOwnership,
+    checkWalletVerification,
+    isVerifying,
+    isVerified,
+    verificationError
+  } = useWalletSigning()
 
   // Set mounted state after component mounts to prevent hydration errors
   useEffect(() => {
@@ -87,8 +97,34 @@ export function ConnectWallet() {
   useEffect(() => {
     if (isConnected && isModalOpen) {
       setIsModalOpen(false)
+
+      // Check if the wallet is already verified
+      if (address) {
+        checkWalletVerification(address)
+          .then(verified => {
+            if (!verified) {
+              // If not verified, show the signing prompt
+              setShowSigningPrompt(true)
+            }
+          })
+          .catch(err => console.error('Error checking wallet verification:', err))
+      }
     }
-  }, [isConnected, isModalOpen])
+  }, [isConnected, isModalOpen, address, checkWalletVerification])
+
+  // Handle wallet verification
+  const handleVerifyWallet = async () => {
+    if (!address) return
+
+    try {
+      const success = await verifyWalletOwnership(address)
+      if (success) {
+        setShowSigningPrompt(false)
+      }
+    } catch (error) {
+      console.error('Error verifying wallet:', error)
+    }
+  }
 
   // Don't render anything during SSR to prevent hydration errors
   if (!isMounted) {
@@ -106,8 +142,8 @@ export function ConnectWallet() {
       <motion.div whileHover={{ scale: 1.05 }}>
         <Button
           onClick={isConnected ? disconnect : toggleModal}
-          className={`bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-medium ${isPending ? 'opacity-50' : ''}`}
-          disabled={isPending}
+          className={`bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-medium ${isPending || isVerifying ? 'opacity-50' : ''}`}
+          disabled={isPending || isVerifying}
         >
           {isPending ? (
             <span className="flex items-center">
@@ -117,8 +153,19 @@ export function ConnectWallet() {
               </svg>
               Connecting...
             </span>
+          ) : isVerifying ? (
+            <span className="flex items-center">
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Verifying...
+            </span>
           ) : isConnected ? (
-            formatAddress(address)
+            <span className="flex items-center">
+              {isVerified && <CheckCircle className="h-3 w-3 mr-1 text-green-400" />}
+              {formatAddress(address)}
+            </span>
           ) : (
             'Connect Wallet'
           )}
@@ -202,6 +249,74 @@ export function ConnectWallet() {
             <p className="text-white/40 text-xs mt-6 text-center">
               By connecting your wallet, you agree to our Terms of Service and Privacy Policy
             </p>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Wallet Verification Modal */}
+      {showSigningPrompt && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-auto my-auto relative"
+            style={{ maxHeight: '90vh', overflowY: 'auto' }}
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-medium text-white">Verify Wallet Ownership</h3>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSigningPrompt(false)}
+                className="text-white/60 hover:text-white hover:bg-white/10"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+
+            <div className="mb-6">
+              <p className="text-white/80 mb-4">
+                Please sign a message to verify your wallet ownership. This helps secure your account and enables transactions.
+              </p>
+              <p className="text-white/60 text-sm mb-6">
+                This signature will not trigger a blockchain transaction or cost any gas fees.
+              </p>
+
+              <motion.div whileHover={{ scale: 1.02 }}>
+                <Button
+                  onClick={handleVerifyWallet}
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white py-4"
+                  disabled={isVerifying}
+                >
+                  {isVerifying ? (
+                    <span className="flex items-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Verifying...
+                    </span>
+                  ) : (
+                    'Sign Message'
+                  )}
+                </Button>
+              </motion.div>
+
+              <Button
+                variant="ghost"
+                className="w-full mt-3 text-white/60 hover:text-white hover:bg-white/10"
+                onClick={() => setShowSigningPrompt(false)}
+              >
+                Skip for Now
+              </Button>
+            </div>
+
+            {verificationError && (
+              <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
+                <p className="text-red-400 text-sm text-center">{verificationError}</p>
+              </div>
+            )}
           </motion.div>
         </div>
       )}
