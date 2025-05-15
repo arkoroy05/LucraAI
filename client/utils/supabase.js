@@ -266,6 +266,269 @@ export const getChatHistory = async (walletAddress, limit = 50) => {
 }
 
 /**
+ * Gets the chat conversations for a user
+ * @param {string} walletAddress - The user's wallet address
+ * @param {number} limit - The maximum number of conversations to retrieve (default: 20)
+ * @returns {Promise<Array>} - The chat conversations
+ */
+export const getChatConversations = async (walletAddress, limit = 20) => {
+  try {
+    if (!walletAddress) return []
+
+    // Call the get_user_conversations RPC function
+    const { data, error } = await supabase.rpc('get_user_conversations', {
+      p_wallet_address: walletAddress,
+      p_limit: limit
+    })
+
+    if (error) {
+      // Check if this is a "function not found" error, which can happen if the function was just created
+      if (error.message && error.message.includes('function not found')) {
+        console.error('Function get_user_conversations not found. It may need to be created in the database.')
+      } else {
+        console.error('Error getting chat conversations:', error)
+      }
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('Error getting chat conversations:', error)
+    return []
+  }
+}
+
+/**
+ * Gets the messages for a specific conversation
+ * @param {number} conversationId - The conversation ID
+ * @param {number} limit - The maximum number of messages to retrieve (default: 100)
+ * @returns {Promise<Array>} - The conversation messages
+ */
+export const getConversationMessages = async (conversationId, limit = 100) => {
+  try {
+    if (!conversationId) return []
+
+    // Call the get_conversation_messages RPC function
+    const { data, error } = await supabase.rpc('get_conversation_messages', {
+      p_conversation_id: conversationId,
+      p_limit: limit
+    })
+
+    if (error) {
+      // Check if this is a "function not found" error, which can happen if the function was just created
+      if (error.message && error.message.includes('function not found')) {
+        console.error('Function get_conversation_messages not found. It may need to be created in the database.')
+      } else {
+        console.error('Error getting conversation messages:', error)
+      }
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('Error getting conversation messages:', error)
+    return []
+  }
+}
+
+/**
+ * Creates a new conversation
+ * @param {string} walletAddress - The user's wallet address
+ * @param {string} title - The conversation title
+ * @returns {Promise<number|null>} - The new conversation ID or null if creation failed
+ */
+export const createConversation = async (walletAddress, title) => {
+  try {
+    if (!walletAddress || !title) {
+      console.error('Missing required parameters for createConversation')
+      return null
+    }
+
+    // Call the create_conversation RPC function
+    const { data, error } = await supabase.rpc('create_conversation', {
+      p_wallet_address: walletAddress,
+      p_title: title
+    })
+
+    if (error) {
+      // Check if this is a "function not found" error, which can happen if the function was just created
+      if (error.message && error.message.includes('function not found')) {
+        console.error('Function create_conversation not found. It may need to be created in the database.')
+
+        // Fallback: Create the conversation directly using the chat_conversations table
+        try {
+          // First get the user ID
+          const { data: user } = await supabase
+            .from('users')
+            .select('id')
+            .eq('wallet_address', walletAddress)
+            .maybeSingle();
+
+          if (user) {
+            const { data: newConversation, error: insertError } = await supabase
+              .from('chat_conversations')
+              .insert({
+                user_id: user.id,
+                title: title,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .select('id')
+              .single();
+
+            if (insertError) {
+              console.error('Error creating conversation directly:', insertError)
+              return null
+            }
+
+            return newConversation?.id || null
+          }
+        } catch (fallbackError) {
+          console.error('Error in fallback conversation creation:', fallbackError)
+        }
+      } else {
+        console.error('Error creating conversation:', error)
+      }
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error creating conversation:', error)
+    return null
+  }
+}
+
+/**
+ * Updates a conversation title
+ * @param {number} conversationId - The conversation ID
+ * @param {string} title - The new title
+ * @returns {Promise<boolean>} - Whether the update was successful
+ */
+export const updateConversationTitle = async (conversationId, title) => {
+  try {
+    if (!conversationId || !title) {
+      console.error('Missing required parameters for updateConversationTitle')
+      return false
+    }
+
+    // Call the update_conversation_title RPC function
+    const { data, error } = await supabase.rpc('update_conversation_title', {
+      p_conversation_id: conversationId,
+      p_title: title
+    })
+
+    if (error) {
+      // Check if this is a "function not found" error, which can happen if the function was just created
+      if (error.message && error.message.includes('function not found')) {
+        console.error('Function update_conversation_title not found. It may need to be created in the database.')
+
+        // Fallback: Update the title directly in the chat_conversations table
+        try {
+          const { error: updateError } = await supabase
+            .from('chat_conversations')
+            .update({
+              title: title,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', conversationId);
+
+          if (updateError) {
+            console.error('Error updating conversation title directly:', updateError)
+            return false
+          }
+
+          return true
+        } catch (fallbackError) {
+          console.error('Error in fallback title update:', fallbackError)
+        }
+      } else {
+        console.error('Error updating conversation title:', error)
+      }
+      return false
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error updating conversation title:', error)
+    return false
+  }
+}
+
+/**
+ * Adds a message to a conversation
+ * @param {number} conversationId - The conversation ID
+ * @param {string} userId - The user ID
+ * @param {string} message - The message content
+ * @param {boolean} isUser - Whether the message is from the user (true) or AI (false)
+ * @param {Object} metadata - Additional metadata for the message (optional)
+ * @returns {Promise<number|null>} - The new message ID or null if addition failed
+ */
+export const addMessageToConversation = async (conversationId, userId, message, isUser, metadata = null) => {
+  try {
+    if (!conversationId || !userId || !message) {
+      console.error('Missing required parameters for addMessageToConversation')
+      return null
+    }
+
+    // Call the add_message_to_conversation RPC function
+    const { data, error } = await supabase.rpc('add_message_to_conversation', {
+      p_conversation_id: conversationId,
+      p_user_id: userId,
+      p_message: message,
+      p_is_user: isUser,
+      p_metadata: metadata
+    })
+
+    if (error) {
+      // Check if this is a "function not found" error, which can happen if the function was just created
+      if (error.message && error.message.includes('function not found')) {
+        console.error('Function add_message_to_conversation not found. It may need to be created in the database.')
+
+        // Fallback: Add the message directly to the chat_history table
+        try {
+          const { data: newMessage, error: insertError } = await supabase
+            .from('chat_history')
+            .insert({
+              user_id: userId,
+              conversation_id: conversationId,
+              message: message,
+              is_user: isUser,
+              created_at: new Date().toISOString(),
+              metadata: metadata
+            })
+            .select('id')
+            .single();
+
+          if (insertError) {
+            console.error('Error adding message directly:', insertError)
+            return null
+          }
+
+          // Update the conversation's updated_at timestamp
+          await supabase
+            .from('chat_conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', conversationId);
+
+          return newMessage?.id || null
+        } catch (fallbackError) {
+          console.error('Error in fallback message addition:', fallbackError)
+        }
+      } else {
+        console.error('Error adding message to conversation:', error)
+      }
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error adding message to conversation:', error)
+    return null
+  }
+}
+
+/**
  * Gets the transaction history for a user
  * @param {string} walletAddress - The user's wallet address
  * @param {number} limit - The maximum number of transactions to retrieve (default: 50)

@@ -11,12 +11,13 @@ import { Input } from "@/components/ui/input"
 import { motion, AnimatePresence } from "framer-motion"
 import { ConnectWallet, AccountInfo, TransactionUI, SmartWalletUI, useWalletConnection } from "@/web3"
 import { useAccount } from "wagmi"
-import { storeWalletAddress } from "@/utils/supabase"
+import { storeWalletAddress, createConversation, addMessageToConversation, getConversationMessages, getUserByWalletAddress } from "@/utils/supabase"
 import ChatHistory from "@/components/ChatHistory"
 import TransactionHistory from "@/components/TransactionHistory"
 import { useWalletBalance } from "@/web3/hooks/useWalletBalance"
 import { formatTokenAmount } from "@/web3/utils/balanceUtils"
 import { useAITransactions } from "@/hooks/useAITransactions"
+import { useSearchParams } from "next/navigation"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -57,6 +58,11 @@ export default function ChatInterface() {
   const { address, isConnected } = useAccount()
   const { isConnected: isWalletConnected } = useWalletConnection()
   const [activeTab, setActiveTab] = useState('chat') // 'chat', 'history', 'transactions'
+  const searchParams = useSearchParams()
+  const conversationId = searchParams.get('conversation')
+  const [currentConversationId, setCurrentConversationId] = useState(null)
+  const [conversationTitle, setConversationTitle] = useState('')
+  const [userId, setUserId] = useState(null)
   const {
     nativeDisplayBalance,
     balances,
@@ -75,6 +81,15 @@ export default function ChatInterface() {
         .then(() => console.log('Wallet address stored in Supabase'))
         .catch(err => console.error('Error storing wallet address:', err))
 
+      // Get user ID for the wallet address
+      getUserByWalletAddress(address)
+        .then(user => {
+          if (user) {
+            setUserId(user.id)
+          }
+        })
+        .catch(err => console.error('Error getting user ID:', err))
+
       // Refresh balances when wallet is connected, but only once
       if (!hasRefreshedRef.current) {
         hasRefreshedRef.current = true;
@@ -88,16 +103,71 @@ export default function ChatInterface() {
     }
   }, [isConnected, address, refreshBalances])
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat({
+  // Load conversation if conversationId is provided
+  useEffect(() => {
+    if (conversationId && isConnected && address) {
+      // Set the current conversation ID
+      setCurrentConversationId(parseInt(conversationId))
+
+      // Load conversation messages
+      getConversationMessages(parseInt(conversationId))
+        .then(messages => {
+          if (messages && messages.length > 0) {
+            // Set conversation title
+            const firstMessage = messages[0]
+            if (firstMessage && firstMessage.is_user) {
+              // Use the first user message as the title (truncated)
+              const title = firstMessage.message.length > 30
+                ? firstMessage.message.substring(0, 30) + '...'
+                : firstMessage.message
+              setConversationTitle(title)
+            }
+          }
+        })
+        .catch(err => console.error('Error loading conversation messages:', err))
+    }
+  }, [conversationId, isConnected, address])
+
+  // Load initial messages for conversation
+  const [initialMessages, setInitialMessages] = useState([])
+
+  // Load conversation messages if conversationId is provided
+  useEffect(() => {
+    if (currentConversationId && isConnected) {
+      getConversationMessages(currentConversationId)
+        .then(messages => {
+          if (messages && messages.length > 0) {
+            // Convert to the format expected by useChat
+            const formattedMessages = messages.map(msg => ({
+              id: msg.id.toString(),
+              role: msg.is_user ? 'user' : 'assistant',
+              content: msg.message,
+              createdAt: new Date(msg.created_at),
+              metadata: msg.metadata
+            }))
+
+            // Set initial messages
+            setInitialMessages(formattedMessages)
+          }
+        })
+        .catch(err => console.error('Error loading conversation messages:', err))
+    } else {
+      // Reset initial messages if no conversation ID
+      setInitialMessages([])
+    }
+  }, [currentConversationId, isConnected])
+
+  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput, setMessages } = useChat({
     api: '/api/chat',
-    id: 'lucra-chat',
-    initialMessages: [],
+    id: currentConversationId ? `conversation-${currentConversationId}` : 'lucra-chat',
+    initialMessages: initialMessages,
     body: {
       clientInfo: {
         clientId: 'lucra-web-client',
         clientVersion: '1.0.0'
       },
-      walletAddress: address || ''
+      walletAddress: address || '',
+      conversationId: currentConversationId
     },
     onResponse: (response) => {
       // This is called when the API response is received
@@ -138,10 +208,33 @@ export default function ChatInterface() {
           }));
 
           console.log('Transaction data attached:', window.__lastParsedData);
+
+          // Save AI response to conversation if we have a conversation ID
+          if (currentConversationId && userId) {
+            addMessageToConversation(
+              currentConversationId,
+              userId,
+              message.content,
+              false,
+              window.__lastParsedData
+            ).catch(error => {
+              console.error('Error saving AI message to conversation:', error);
+            });
+          }
         }, 0);
 
         // Clear the temporary storage
         window.__lastParsedData = null;
+      } else if (currentConversationId && userId) {
+        // Save AI response to conversation without parsed data
+        addMessageToConversation(
+          currentConversationId,
+          userId,
+          message.content,
+          false
+        ).catch(error => {
+          console.error('Error saving AI message to conversation:', error);
+        });
       }
     },
     onError: (error) => {
@@ -402,6 +495,26 @@ export default function ChatInterface() {
 
     const userMessage = input.trim();
 
+    // Create a new conversation if this is the first message and we're not in an existing conversation
+    if (!currentConversationId && messages.length === 0 && isConnected && userId) {
+      try {
+        // Create a new conversation with the first message as the title
+        const title = userMessage.length > 30
+          ? userMessage.substring(0, 30) + '...'
+          : userMessage;
+
+        const newConversationId = await createConversation(address, title);
+
+        if (newConversationId) {
+          setCurrentConversationId(newConversationId);
+          setConversationTitle(title);
+          console.log('Created new conversation:', newConversationId);
+        }
+      } catch (error) {
+        console.error('Error creating conversation:', error);
+      }
+    }
+
     // Check if this appears to be a transaction request
     if (isConnected && isTransactionRequest(userMessage)) {
       try {
@@ -438,6 +551,26 @@ export default function ChatInterface() {
             }
           }));
 
+          // Save messages to conversation if we have a conversation ID
+          if (currentConversationId && userId) {
+            // Save user message
+            await addMessageToConversation(
+              currentConversationId,
+              userId,
+              userMessage,
+              true
+            );
+
+            // Save AI response
+            await addMessageToConversation(
+              currentConversationId,
+              userId,
+              aiResponseObj.content,
+              false,
+              { transaction: result.details }
+            );
+          }
+
           return;
         }
       } catch (error) {
@@ -447,7 +580,27 @@ export default function ChatInterface() {
     }
 
     // Call the handleSubmit function from useChat for non-transaction messages
-    handleSubmit(e);
+    const originalHandleSubmit = handleSubmit(e);
+
+    // Save messages to conversation if we have a conversation ID
+    if (currentConversationId && userId) {
+      // We need to wait for the response to be received before saving the AI message
+      // This is handled in the onFinish callback of useChat
+
+      // Save user message immediately
+      try {
+        await addMessageToConversation(
+          currentConversationId,
+          userId,
+          userMessage,
+          true
+        );
+      } catch (error) {
+        console.error('Error saving user message to conversation:', error);
+      }
+    }
+
+    return originalHandleSubmit;
   }
 
   return (

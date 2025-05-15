@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useAccount, useChainId } from 'wagmi'
-import { resolveBaseName, lookupBaseName } from '../../../web3/utils/baseNameResolver'
-import { getNetworkByChainId, BASE_SEPOLIA } from '../../../web3'
+import { resolveBaseName, lookupBaseName } from '../utils/baseNameResolver'
+import { getNetworkByChainId, BASE_SEPOLIA } from '..'
 
 /**
  * Custom hook for Base Name resolution

@@ -481,7 +481,7 @@ export async function POST(req) {
 
     // Parse the request body
     const body = await req.json();
-    const { messages, walletAddress } = body;
+    const { messages, walletAddress, conversationId } = body;
 
     // Get the last user message
     const lastUserMessage = messages[messages.length - 1];
@@ -514,30 +514,42 @@ export async function POST(req) {
             .single();
 
           if (user) {
+            // If we have a conversation ID, use it
+            const messageData = {
+              user_id: user.id,
+              message: lastUserMessage.content,
+              is_user: true,
+              created_at: new Date().toISOString()
+            };
+
+            // Add conversation_id if provided
+            if (conversationId) {
+              messageData.conversation_id = conversationId;
+            }
+
             // Store the user message
             await supabaseServer
               .from('chat_history')
-              .insert([
-                {
-                  user_id: user.id,
-                  message: lastUserMessage.content,
-                  is_user: true,
-                  created_at: new Date().toISOString()
-                }
-              ]);
+              .insert([messageData]);
+
+            // Prepare AI response data
+            const aiResponseData = {
+              user_id: user.id,
+              message: aiResponse,
+              is_user: false,
+              created_at: new Date().toISOString(),
+              metadata: parsedData.intent === 'send' || parsedData.intent === 'split' ? { transaction: parsedData } : null
+            };
+
+            // Add conversation_id if provided
+            if (conversationId) {
+              aiResponseData.conversation_id = conversationId;
+            }
 
             // Store the AI response
             await supabaseServer
               .from('chat_history')
-              .insert([
-                {
-                  user_id: user.id,
-                  message: aiResponse,
-                  is_user: false,
-                  created_at: new Date().toISOString(),
-                  metadata: parsedData.intent === 'send' || parsedData.intent === 'split' ? { transaction: parsedData } : null
-                }
-              ]);
+              .insert([aiResponseData]);
 
             // If this is a transaction, store it in the transactions table
             if (parsedData.intent === 'send' || parsedData.intent === 'split') {
@@ -560,6 +572,14 @@ export async function POST(req) {
                     metadata: parsedData
                   }
                 ]);
+            }
+
+            // Update conversation's updated_at timestamp if we have a conversation ID
+            if (conversationId) {
+              await supabaseServer
+                .from('chat_conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', conversationId);
             }
           } else {
             console.log('User not found in database:', walletAddress);
@@ -604,29 +624,49 @@ export async function POST(req) {
             .single();
 
           if (user) {
+            // Prepare user message data
+            const userMessageData = {
+              user_id: user.id,
+              message: lastUserMessage.content,
+              is_user: true,
+              created_at: new Date().toISOString()
+            };
+
+            // Add conversation_id if provided
+            if (conversationId) {
+              userMessageData.conversation_id = conversationId;
+            }
+
             // Store the user message
             await supabaseServer
               .from('chat_history')
-              .insert([
-                {
-                  user_id: user.id,
-                  message: lastUserMessage.content,
-                  is_user: true,
-                  created_at: new Date().toISOString()
-                }
-              ]);
+              .insert([userMessageData]);
+
+            // Prepare AI response data
+            const aiResponseData = {
+              user_id: user.id,
+              message: fallbackResponse,
+              is_user: false,
+              created_at: new Date().toISOString()
+            };
+
+            // Add conversation_id if provided
+            if (conversationId) {
+              aiResponseData.conversation_id = conversationId;
+            }
 
             // Store the AI response
             await supabaseServer
               .from('chat_history')
-              .insert([
-                {
-                  user_id: user.id,
-                  message: fallbackResponse,
-                  is_user: false,
-                  created_at: new Date().toISOString()
-                }
-              ]);
+              .insert([aiResponseData]);
+
+            // Update conversation's updated_at timestamp if we have a conversation ID
+            if (conversationId) {
+              await supabaseServer
+                .from('chat_conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', conversationId);
+            }
           }
         } catch (dbError) {
           console.error('Error storing message in database:', dbError);

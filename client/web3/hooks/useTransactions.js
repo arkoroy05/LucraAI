@@ -11,7 +11,7 @@ import {
   getNetworkByChainId,
   BASE_MAINNET,
   BASE_SEPOLIA
-} from '../../../web3'
+} from '..'
 
 /**
  * Custom hook for handling cryptocurrency transactions
