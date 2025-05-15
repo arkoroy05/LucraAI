@@ -35,24 +35,29 @@ export function useSmartWalletMapping() {
       setIsLoading(true)
       setError(null)
 
-      // First try to get wallets from localStorage
+      // Only try to get wallets from localStorage if explicitly requested or as fallback
       let localWallets = [];
-      try {
-        const normalizedAddress = address.toLowerCase();
-        const walletKey = `smart_wallet_${normalizedAddress}`;
-        const storedWallet = localStorage.getItem(walletKey);
+      const useLocalStorage = typeof window !== 'undefined' &&
+        (window.location.search.includes('useLocalStorage=true') || window.location.search.includes('useMockWallet=true'));
 
-        if (storedWallet) {
-          try {
-            const walletData = JSON.parse(storedWallet);
-            console.log('Found wallet in localStorage:', walletData.address);
-            localWallets.push(walletData);
-          } catch (parseError) {
-            console.warn('Error parsing wallet from localStorage:', parseError);
+      if (useLocalStorage) {
+        try {
+          const normalizedAddress = address.toLowerCase();
+          const walletKey = `smart_wallet_${normalizedAddress}`;
+          const storedWallet = localStorage.getItem(walletKey);
+
+          if (storedWallet) {
+            try {
+              const walletData = JSON.parse(storedWallet);
+              console.log('Found wallet in localStorage:', walletData.address);
+              localWallets.push(walletData);
+            } catch (parseError) {
+              console.warn('Error parsing wallet from localStorage:', parseError);
+            }
           }
+        } catch (storageError) {
+          console.warn('Error accessing localStorage:', storageError);
         }
-      } catch (storageError) {
-        console.warn('Error accessing localStorage:', storageError);
       }
 
       // Then try to query the database
@@ -197,28 +202,34 @@ export function useSmartWalletMapping() {
 
       // Try to insert the wallet via an API endpoint
       try {
-        console.log('Storing smart wallet data via localStorage');
+        console.log('Attempting to store smart wallet data');
 
-        // Store the wallet data in localStorage as a fallback
-        try {
-          const walletKey = `smart_wallet_${normalizedOwnerAddress}`;
-          const walletData = {
-            address: normalizedWalletAddress,
-            owner_address: normalizedOwnerAddress,
-            network_id: smartWalletData.networkId || 'base-sepolia',
-            metadata: {
-              privateKey: smartWalletData.privateKey,
-              publicKey: smartWalletData.publicKey,
-              ...smartWalletData.metadata
-            },
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
+        // Only store in localStorage if explicitly requested or as fallback
+        const useLocalStorage = typeof window !== 'undefined' &&
+          (window.location.search.includes('useLocalStorage=true') || window.location.search.includes('useMockWallet=true'));
 
-          localStorage.setItem(walletKey, JSON.stringify(walletData));
-          console.log('Smart wallet data stored in localStorage');
-        } catch (storageError) {
-          console.warn('Failed to store wallet in localStorage:', storageError);
+        if (useLocalStorage) {
+          try {
+            console.log('Storing smart wallet data in localStorage (as requested or fallback)');
+            const walletKey = `smart_wallet_${normalizedOwnerAddress}`;
+            const walletData = {
+              address: normalizedWalletAddress,
+              owner_address: normalizedOwnerAddress,
+              network_id: smartWalletData.networkId || 'base-sepolia',
+              metadata: {
+                privateKey: smartWalletData.privateKey,
+                publicKey: smartWalletData.publicKey,
+                ...smartWalletData.metadata
+              },
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+
+            localStorage.setItem(walletKey, JSON.stringify(walletData));
+            console.log('Smart wallet data stored in localStorage');
+          } catch (storageError) {
+            console.warn('Failed to store wallet in localStorage:', storageError);
+          }
         }
 
         // Try to store in database as well
@@ -245,19 +256,25 @@ export function useSmartWalletMapping() {
       try {
         console.log('Updating user record with smart wallet address');
 
-        // Store the mapping in localStorage as a fallback
-        try {
-          const mappingKey = `wallet_mapping_${address.toLowerCase()}`;
-          const mappingData = {
-            wallet_address: address.toLowerCase(),
-            smart_wallet_address: smartWalletData.address,
-            updated_at: new Date().toISOString()
-          };
+        // Only store in localStorage if explicitly requested or as fallback
+        const useLocalStorage = typeof window !== 'undefined' &&
+          (window.location.search.includes('useLocalStorage=true') || window.location.search.includes('useMockWallet=true'));
 
-          localStorage.setItem(mappingKey, JSON.stringify(mappingData));
-          console.log('Wallet mapping stored in localStorage');
-        } catch (storageError) {
-          console.warn('Failed to store mapping in localStorage:', storageError);
+        if (useLocalStorage) {
+          try {
+            console.log('Storing wallet mapping in localStorage (as requested or fallback)');
+            const mappingKey = `wallet_mapping_${address.toLowerCase()}`;
+            const mappingData = {
+              wallet_address: address.toLowerCase(),
+              smart_wallet_address: smartWalletData.address,
+              updated_at: new Date().toISOString()
+            };
+
+            localStorage.setItem(mappingKey, JSON.stringify(mappingData));
+            console.log('Wallet mapping stored in localStorage');
+          } catch (storageError) {
+            console.warn('Failed to store mapping in localStorage:', storageError);
+          }
         }
 
         // Try to update in database as well
@@ -327,9 +344,9 @@ export function useSmartWalletMapping() {
         return mappedWallets[0]
       }
 
-      // For development, create a mock wallet immediately
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('Development mode: Creating mock wallet')
+      // Only use mock wallet if explicitly requested via query parameter
+      if (typeof window !== 'undefined' && window.location.search.includes('useMockWallet=true')) {
+        console.log('Creating mock wallet as requested via URL parameter')
         const mockWallet = {
           address: `0x${address.substring(2, 10)}000000000000000000000000000000`,
           networkId: 'base-sepolia',
@@ -390,14 +407,18 @@ export function useSmartWalletMapping() {
         }
 
         // If we can't create a wallet and don't have any existing ones,
-        // create a mock wallet for development purposes
-        console.log('Creating mock wallet as fallback')
-        newWallet = {
-          address: `0x${address.substring(2, 10)}000000000000000000000000000000`,
-          networkId: 'base-sepolia',
-          privateKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          publicKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          metadata: { isMock: true, fallback: true }
+        // throw an error unless mock wallet is explicitly requested
+        if (typeof window !== 'undefined' && window.location.search.includes('useMockWallet=true')) {
+          console.log('Creating mock wallet as fallback (requested via URL parameter)')
+          newWallet = {
+            address: `0x${address.substring(2, 10)}000000000000000000000000000000`,
+            networkId: 'base-sepolia',
+            privateKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
+            publicKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
+            metadata: { isMock: true, fallback: true }
+          }
+        } else {
+          throw new Error('Failed to create smart wallet and no fallback available')
         }
       }
 

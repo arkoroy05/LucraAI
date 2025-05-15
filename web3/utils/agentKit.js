@@ -204,9 +204,10 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
 
             console.log(`Fetching balance for wallet: ${walletAddress} on ${chain.name}`);
 
-            // For development, always return a mock balance immediately
-            if (process.env.NODE_ENV !== 'production') {
-              console.log('Development mode: Using mock balance');
+            // Only use mock balance if explicitly requested via query parameter
+            // Check if there's a URL parameter for using mock data
+            if (typeof window !== 'undefined' && window.location.search.includes('useMockBalance=true')) {
+              console.log('Using mock balance as requested via URL parameter');
               return {
                 balance: '0.1',
                 token: 'ETH',
@@ -215,13 +216,7 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
               };
             }
 
-            // Get the balance from the client with a longer timeout
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Balance fetch timed out')), 30000)
-            );
-
-            // For development, return a mock balance immediately to prevent timeouts
-            // This is a fallback that will be used if the real fetch fails
+            // Define a mock balance as fallback
             const mockBalance = BigInt('100000000000000000'); // 0.1 ETH
 
             try {
@@ -229,6 +224,12 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
               const rpcUrl = useTestnet
                 ? (process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org')
                 : (process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL || 'https://mainnet.base.org');
+
+              // Create a fetch promise with timeout using AbortController
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+              console.log(`Fetching balance from ${rpcUrl} with 15s timeout`);
 
               const response = await fetch(rpcUrl, {
                 method: 'POST',
@@ -241,7 +242,11 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
                   method: 'eth_getBalance',
                   params: [walletAddress, 'latest'],
                 }),
+                signal: controller.signal
               });
+
+              // Clear the timeout since fetch completed
+              clearTimeout(timeoutId);
 
               if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -265,8 +270,57 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
                 chain: chain.name,
               };
             } catch (error) {
-              console.warn('Using mock balance due to fetch error:', error.message);
-              // Return mock balance instead of failing
+              // Check if this is an abort error (timeout)
+              if (error.name === 'AbortError') {
+                console.warn('Balance fetch timed out after 15 seconds, using mock balance');
+              } else {
+                console.warn('Using mock balance due to fetch error:', error.message);
+              }
+
+              // Try an alternative RPC URL as fallback
+              try {
+                const fallbackRpcUrl = useTestnet
+                  ? 'https://base-sepolia-rpc.publicnode.com'
+                  : 'https://base-mainnet-rpc.publicnode.com';
+
+                console.log(`Trying fallback RPC URL: ${fallbackRpcUrl}`);
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for fallback
+
+                const fallbackResponse = await fetch(fallbackRpcUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: Date.now(),
+                    method: 'eth_getBalance',
+                    params: [walletAddress, 'latest'],
+                  }),
+                  signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (fallbackResponse.ok) {
+                  const data = await fallbackResponse.json();
+                  if (!data.error) {
+                    const balance = BigInt(data.result);
+                    console.log(`Successfully fetched balance from fallback RPC: ${balance.toString()}`);
+                    return {
+                      balance: formatEther(balance),
+                      token: 'ETH',
+                      chain: chain.name,
+                    };
+                  }
+                }
+              } catch (fallbackError) {
+                console.warn('Fallback RPC also failed:', fallbackError.message);
+              }
+
+              // Return mock balance as last resort
               return {
                 balance: formatEther(mockBalance),
                 token: 'ETH',
