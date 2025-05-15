@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useAccount, useChainId } from 'wagmi';
 import { useTransactions } from '@/web3';
-import { getNetworkByChainId, BASE_SEPOLIA } from '../../web3';
+import { getNetworkByChainId, BASE_SEPOLIA } from '@/web3/config/networks';
 
 /**
  * Custom hook for AI-powered transactions
