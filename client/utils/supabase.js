@@ -20,35 +20,52 @@ export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
  */
 export const storeWalletAddress = async (walletAddress, walletType) => {
   try {
-    // First check if the user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('*')
-      .eq('wallet_address', walletAddress)
-      .single()
+    if (!walletAddress) {
+      console.error('No wallet address provided to storeWalletAddress');
+      return { error: 'No wallet address provided' };
+    }
 
-    if (existingUser) {
+    // Normalize the wallet address to lowercase to prevent case-sensitivity issues
+    const normalizedAddress = walletAddress.toLowerCase();
+
+    // First check if the user already exists
+    const { data: existingUser, error: selectError } = await supabase
+      .from('users')
+      .select('id, wallet_address')
+      .eq('wallet_address', normalizedAddress)
+
+    if (selectError) {
+      console.error('Error checking for existing user:', selectError);
+      // Continue anyway to try to create the user
+    }
+
+    if (existingUser && existingUser.length > 0) {
       // User exists, update the last login time
+      console.log('User exists, updating last login time');
       return await supabase
         .from('users')
-        .update({ updated_at: new Date() })
-        .eq('wallet_address', walletAddress)
+        .update({
+          updated_at: new Date().toISOString(),
+          wallet_type: walletType || 'unknown'
+        })
+        .eq('wallet_address', normalizedAddress)
     } else {
       // User doesn't exist, create a new record
+      console.log('User does not exist, creating new record');
       return await supabase
         .from('users')
         .insert([
           {
-            wallet_address: walletAddress,
-            wallet_type: walletType,
-            created_at: new Date(),
-            updated_at: new Date()
+            wallet_address: normalizedAddress,
+            wallet_type: walletType || 'unknown',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
           }
         ])
     }
   } catch (error) {
     console.error('Error storing wallet address:', error)
-    throw error
+    return { error: error.message || 'Unknown error storing wallet address' }
   }
 }
 
@@ -62,15 +79,50 @@ export const storeWalletAddress = async (walletAddress, walletType) => {
  */
 export const storeChatMessage = async (walletAddress, message, isUser, metadata = {}) => {
   try {
+    if (!walletAddress) {
+      throw new Error('No wallet address provided');
+    }
+
+    // Normalize the wallet address to lowercase
+    const normalizedAddress = walletAddress.toLowerCase();
+
     // First get the user ID
-    const { data: user } = await supabase
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
-      .eq('wallet_address', walletAddress)
-      .single()
+      .eq('wallet_address', normalizedAddress)
+      .maybeSingle();
+
+    if (userError) {
+      console.error('Error getting user for chat message:', userError);
+      throw new Error('Error getting user: ' + userError.message);
+    }
 
     if (!user) {
-      throw new Error('User not found')
+      // Create the user if they don't exist
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert([
+          {
+            wallet_address: normalizedAddress,
+            wallet_type: 'wagmi',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (insertError) {
+        console.error('Error creating user for chat message:', insertError);
+        throw new Error('Failed to create user: ' + insertError.message);
+      }
+
+      if (!newUser || newUser.length === 0) {
+        throw new Error('User not found and could not be created');
+      }
+
+      // Use the newly created user
+      user = newUser[0];
     }
 
     return await supabase
@@ -115,15 +167,50 @@ export const storeTransaction = async (
   metadata = {}
 ) => {
   try {
+    if (!walletAddress) {
+      throw new Error('No wallet address provided');
+    }
+
+    // Normalize the wallet address to lowercase
+    const normalizedAddress = walletAddress.toLowerCase();
+
     // First get the user ID
-    const { data: user } = await supabase
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
-      .eq('wallet_address', walletAddress)
-      .single()
+      .eq('wallet_address', normalizedAddress)
+      .maybeSingle();
+
+    if (userError) {
+      console.error('Error getting user for transaction:', userError);
+      throw new Error('Error getting user: ' + userError.message);
+    }
 
     if (!user) {
-      throw new Error('User not found')
+      // Create the user if they don't exist
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert([
+          {
+            wallet_address: normalizedAddress,
+            wallet_type: 'wagmi',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (insertError) {
+        console.error('Error creating user for transaction:', insertError);
+        throw new Error('Failed to create user: ' + insertError.message);
+      }
+
+      if (!newUser || newUser.length === 0) {
+        throw new Error('User not found and could not be created');
+      }
+
+      // Use the newly created user
+      user = newUser[0];
     }
 
     return await supabase
@@ -220,6 +307,11 @@ export const syncTransactionHistory = async (walletAddress) => {
   // 3. Add any new transactions
 
   try {
+    if (!walletAddress) {
+      console.error('No wallet address provided for transaction sync');
+      return false;
+    }
+
     const response = await fetch('/api/transactions/sync', {
       method: 'POST',
       headers: {
@@ -251,31 +343,78 @@ export const syncTransactionHistory = async (walletAddress) => {
 export const updateTransactionStatus = async (transactionId, transactionHash, status, walletAddress) => {
   try {
     if (!transactionId || !status || !walletAddress) {
-      return { error: 'Missing required parameters' }
+      console.error('Missing required parameters for updateTransactionStatus:', {
+        transactionId, transactionHash, status, walletAddress
+      });
+      return { error: 'Missing required parameters' };
     }
+
+    // Ensure all parameters are strings
+    const payload = {
+      transactionId: String(transactionId),
+      transactionHash: transactionHash ? String(transactionHash) : null,
+      status: String(status),
+      walletAddress: String(walletAddress)
+    };
 
     const response = await fetch('/api/transactions/update', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        transactionId,
-        transactionHash,
-        status,
-        walletAddress
-      })
-    })
+      body: JSON.stringify(payload)
+    });
 
     if (!response.ok) {
-      const errorData = await response.json()
-      return { error: errorData.error || 'Failed to update transaction status' }
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: errorText };
+      }
+      console.error('Error response from transaction update API:', errorData);
+      return { error: errorData.error || 'Failed to update transaction status' };
     }
 
-    const data = await response.json()
-    return { data }
+    const data = await response.json();
+    return { data };
   } catch (error) {
-    console.error('Error updating transaction status:', error)
-    return { error }
+    console.error('Error updating transaction status:', error);
+    return { error: error.message || 'Unknown error updating transaction status' };
+  }
+}
+
+/**
+ * Gets a user by wallet address
+ * @param {string} walletAddress - The user's wallet address
+ * @returns {Promise<Object>} - The user object
+ */
+export const getUserByWalletAddress = async (walletAddress) => {
+  try {
+    if (!walletAddress) {
+      console.error('No wallet address provided to getUserByWalletAddress');
+      return null;
+    }
+
+    // Normalize the wallet address to lowercase
+    const normalizedAddress = walletAddress.toLowerCase();
+
+    // Use maybeSingle instead of single to avoid 406 errors when no user is found
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('wallet_address', normalizedAddress)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error getting user by wallet address:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error getting user by wallet address:', error);
+    return null;
   }
 }

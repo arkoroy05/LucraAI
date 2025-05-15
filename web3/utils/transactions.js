@@ -111,28 +111,36 @@ export async function storeTransaction({
       return false;
     }
 
+    // Ensure all values are properly formatted
+    const payload = {
+      transactionHash: hash ? String(hash) : 'pending-' + Date.now(),
+      recipientAddress: to ? String(to) : 'unknown',
+      amount: value ? String(value) : '0',
+      token: token ? String(token) : 'ETH',
+      walletAddress: String(walletAddress),
+      transactionType: type ? String(type) : 'send',
+      status: status ? String(status) : 'pending',
+      note: note ? String(note) : '',
+    };
+
+    console.log('Storing transaction with payload:', payload);
+
     // Call the API to store the transaction
     const response = await fetch('/api/transactions/store', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        transactionHash: hash || 'pending-' + Date.now(),
-        recipientAddress: to || 'unknown',
-        amount: value || '0',
-        token: token || 'ETH',
-        walletAddress,
-        transactionType: type || 'send',
-        status: status || 'pending',
-        note: note || '',
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to store transaction: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`Failed to store transaction: ${response.status} ${response.statusText}`, errorText);
+      return false;
     }
 
+    console.log('Transaction stored successfully');
     return true;
   } catch (error) {
     console.error('Error storing transaction:', error);

@@ -31,6 +31,14 @@ export function useAITransactions() {
       setIsProcessing(true);
       setError(null);
 
+      // Ensure we have a valid address
+      if (!address) {
+        throw new Error('Wallet not connected. Please connect your wallet first.');
+      }
+
+      console.log('Processing message with AI:', message);
+      console.log('Using wallet address:', address);
+      console.log('Using testnet:', useTestnet);
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -39,18 +47,23 @@ export function useAITransactions() {
         },
         body: JSON.stringify({
           messages: [{ role: 'user', content: message }],
-          walletAddress: address || '',
+          walletAddress: address,
           useTestnet: useTestnet || false,
         }),
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API response error:', response.status, errorText);
         throw new Error(`Failed to process message: ${response.statusText}`);
       }
 
       // Get the parsed data from the custom header
       const parsedDataHeader = response.headers.get('X-Parsed-Data');
       let data = { type: 'message' };
+
+      // Get the response text first so we don't consume the body twice
+      const responseText = await response.text();
 
       if (parsedDataHeader) {
         try {
@@ -70,13 +83,36 @@ export function useAITransactions() {
                 note: parsedData.note
               },
               agentResponse: {
-                response: await response.text()
+                response: responseText
+              }
+            };
+          } else {
+            // For non-transaction intents
+            data = {
+              type: 'message',
+              agentResponse: {
+                response: responseText
               }
             };
           }
         } catch (err) {
           console.error('Error parsing X-Parsed-Data header:', err);
+          // Use the response text as a regular message
+          data = {
+            type: 'message',
+            agentResponse: {
+              response: responseText
+            }
+          };
         }
+      } else {
+        // No parsed data header, just use the response text
+        data = {
+          type: 'message',
+          agentResponse: {
+            response: responseText
+          }
+        };
       }
 
       setLastResponse(data);
@@ -85,18 +121,43 @@ export function useAITransactions() {
       if (data.type === 'transaction') {
         const { details } = data;
 
-        if (details.type === 'send') {
-          await sendPayment(
-            details.recipient,
-            details.amount,
-            details.token || 'ETH'
-          );
-        } else if (details.type === 'split') {
-          await splitPayment(
-            details.recipients,
-            details.amount,
-            details.token || 'ETH'
-          );
+        try {
+          console.log('Executing transaction:', details);
+
+          if (details.type === 'send') {
+            if (!details.recipient || details.recipient === 'unknown') {
+              throw new Error('Invalid recipient address');
+            }
+
+            await sendPayment(
+              details.recipient,
+              details.amount,
+              details.token || 'ETH',
+              details.note || ''
+            );
+
+            console.log('Send payment executed successfully');
+          } else if (details.type === 'split') {
+            if (!details.recipients || details.recipients.length === 0) {
+              throw new Error('No recipients specified for split payment');
+            }
+
+            await splitPayment(
+              details.recipients,
+              details.amount,
+              details.token || 'ETH',
+              details.note || ''
+            );
+
+            console.log('Split payment executed successfully');
+          } else {
+            console.warn('Unknown transaction type:', details.type);
+          }
+        } catch (txError) {
+          console.error('Error executing transaction:', txError);
+          // Don't throw here, we'll still return the data with the AI response
+          // but we'll add the error to the data
+          data.error = txError.message;
         }
       }
 
@@ -104,7 +165,13 @@ export function useAITransactions() {
     } catch (error) {
       console.error('Error processing AI transaction:', error);
       setError(error.message || 'Failed to process transaction');
-      return { type: 'error', error: error.message };
+      return {
+        type: 'error',
+        error: error.message,
+        agentResponse: {
+          response: `I'm sorry, but I encountered an error: ${error.message}`
+        }
+      };
     } finally {
       setIsProcessing(false);
     }

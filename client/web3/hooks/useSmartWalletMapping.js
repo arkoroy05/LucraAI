@@ -61,56 +61,121 @@ export function useSmartWalletMapping() {
    * @returns {Promise<boolean>} - Whether the mapping was successful
    */
   const mapSmartWallet = useCallback(async (smartWalletData) => {
-    if (!address || !smartWalletData?.address) return false
+    if (!address || !smartWalletData?.address) {
+      console.error('Missing address or smart wallet address');
+      return false;
+    }
 
     try {
-      setIsLoading(true)
-      setError(null)
+      setIsLoading(true);
+      setError(null);
 
-      // First check if this wallet is already mapped
+      // Normalize addresses to lowercase
+      const normalizedOwnerAddress = address.toLowerCase();
+      const normalizedWalletAddress = smartWalletData.address.toLowerCase();
+
+      // Instead of trying to create the user directly in this function,
+      // use the API endpoint we created to ensure the user exists
+      try {
+        console.log('Ensuring user exists via API before mapping smart wallet');
+        const response = await fetch('/api/users/ensure', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            walletAddress: normalizedOwnerAddress,
+            walletType: 'wagmi'
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Failed to ensure user exists:', errorText);
+          throw new Error(`Failed to ensure user exists: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('User record ensured in database:', result.message);
+      } catch (userError) {
+        console.error('Error ensuring user exists:', userError);
+
+        // As a fallback, try to create the user directly
+        console.log('Trying direct database insertion as fallback');
+
+        // First check if the user already exists
+        const { data: existingUser, error: checkError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('wallet_address', normalizedOwnerAddress)
+          .maybeSingle();
+
+        if (checkError) {
+          console.error('Error checking for existing user:', checkError);
+        }
+
+        // Only try to insert if the user doesn't exist
+        if (!existingUser) {
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              wallet_address: normalizedOwnerAddress,
+              wallet_type: 'wagmi',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+
+          if (insertError) {
+            console.error('Error in fallback user creation:', insertError);
+            throw new Error(`Failed to create user record: ${insertError.message || 'Unknown error'}`);
+          }
+        }
+      }
+
+      // Now check if this wallet is already mapped
       const { data: existingWallet, error: checkError } = await supabase
         .from('smart_wallets')
         .select('id')
-        .eq('address', smartWalletData.address)
-        .single()
+        .eq('address', normalizedWalletAddress);
 
-      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found" which is expected
-        console.warn('Error checking for existing wallet:', checkError)
+      if (checkError) {
+        console.warn('Error checking for existing wallet:', checkError);
       }
 
       // If wallet already exists, consider it a success
-      if (existingWallet) {
-        console.log('Smart wallet already mapped:', smartWalletData.address)
-        return true
+      if (existingWallet && existingWallet.length > 0) {
+        console.log('Smart wallet already mapped:', normalizedWalletAddress);
+        return true;
       }
 
-      // Try to insert first, and if that fails, try to update
+      // Try to insert the wallet
       try {
-        // First try to insert the wallet
         const { error: insertError } = await supabase
           .from('smart_wallets')
           .insert([
             {
-              address: smartWalletData.address,
-              owner_address: address,
+              address: normalizedWalletAddress,
+              owner_address: normalizedOwnerAddress,
               network_id: smartWalletData.networkId || 'base-sepolia',
               metadata: {
                 privateKey: smartWalletData.privateKey,
                 publicKey: smartWalletData.publicKey,
                 ...smartWalletData.metadata
-              }
+              },
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
             }
-          ])
+          ]);
 
-        // If insert fails with a unique violation, try to update instead
+        // If insert fails, try to update instead
         if (insertError) {
-          console.log('Insert failed, trying update instead:', insertError.message)
+          console.log('Insert failed, trying update instead:', insertError.message);
 
           // Update the existing wallet
           const { error: updateError } = await supabase
             .from('smart_wallets')
             .update({
-              owner_address: address,
+              owner_address: normalizedOwnerAddress,
               network_id: smartWalletData.networkId || 'base-sepolia',
               metadata: {
                 privateKey: smartWalletData.privateKey,
@@ -119,15 +184,15 @@ export function useSmartWalletMapping() {
               },
               updated_at: new Date().toISOString()
             })
-            .eq('address', smartWalletData.address)
+            .eq('address', normalizedWalletAddress);
 
           if (updateError) {
-            console.error('Error updating smart wallet:', updateError)
-            throw updateError
+            console.error('Error updating smart wallet:', updateError);
+            throw updateError;
           }
         }
       } catch (dbError) {
-        console.error('Database operation failed:', dbError)
+        console.error('Database operation failed:', dbError);
         // Don't throw here, we'll still try to update the user record
       }
 
@@ -187,7 +252,29 @@ export function useSmartWalletMapping() {
       setIsLoading(true)
       setError(null)
 
-      // First check if we already have mapped wallets
+      // First ensure the user exists in the database
+      try {
+        const response = await fetch('/api/users/ensure', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            walletAddress: address,
+            walletType: 'wagmi'
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('Failed to ensure user exists in database, but continuing anyway');
+        } else {
+          console.log('User record ensured in database');
+        }
+      } catch (userError) {
+        console.warn('Error ensuring user exists in database, but continuing anyway:', userError);
+      }
+
+      // Check if we already have mapped wallets
       if (mappedWallets.length > 0 && !options.force) {
         console.log('Using existing mapped wallet instead of creating a new one')
         return mappedWallets[0]

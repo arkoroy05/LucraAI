@@ -80,6 +80,28 @@ export function SmartWalletUI() {
       setIsCreating(true)
       console.log('Creating new Smart Wallet...')
 
+      // First ensure the user exists in the database
+      try {
+        const response = await fetch('/api/users/ensure', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            walletAddress: address,
+            walletType: 'wagmi'
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('Failed to ensure user exists, but continuing anyway');
+        } else {
+          console.log('User record ensured in database');
+        }
+      } catch (userError) {
+        console.warn('Error ensuring user exists, but continuing anyway:', userError);
+      }
+
       // If we already have mapped wallets, force creation of a new one
       const options = mappedWallets.length > 0 ? { force: true } : {}
 
@@ -308,9 +330,6 @@ export function SmartWalletUI() {
         </div>
       ) : (
         <div className="flex flex-col">
-          <div className="text-white/60 mb-4">
-            Create a Smart Wallet to use advanced features like automatic transactions and multi-signature approvals.
-          </div>
           <motion.div whileHover={{ scale: 1.02 }} className="self-center">
             <Button
               onClick={handleCreateWallet}
