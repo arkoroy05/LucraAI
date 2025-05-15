@@ -20,6 +20,17 @@ export { useBaseName } from './hooks/useBaseName'
 // Config
 export { config as wagmiConfig } from './config/wagmi'
 
+// Network Configuration
+export { 
+  BASE_MAINNET, 
+  BASE_SEPOLIA, 
+  getNetworkByChainId, 
+  getExplorerUrl,
+  getAddressExplorerUrl,
+  isBaseNetwork,
+  getNetworkName 
+} from './config/networks'
+
 // Transaction Utilities
 export {
   prepareTransaction,
@@ -30,46 +41,30 @@ export {
 // Base Name Resolution Utilities
 export {
   resolveBaseName,
-  lookupBaseName
+  lookupBaseName,
+  isBaseName,
+  formatAddressOrName
 } from './utils/baseNameResolver'
 
-// Network Constants
-export const BASE_MAINNET = {
-  id: 8453,
-  name: 'Base Mainnet',
-  rpcUrl: 'https://mainnet.base.org',
-  blockExplorer: 'https://basescan.org',
-  currency: {
-    name: 'Ethereum',
-    symbol: 'ETH',
-    decimals: 18
-  }
-}
+// Smart Wallet Utilities
+export {
+  createSmartWallet,
+  storeSmartWallet,
+  getStoredSmartWallet,
+  clearStoredSmartWallet,
+  hasStoredSmartWallet
+} from './utils/smartWallet'
 
-export const BASE_SEPOLIA = {
-  id: 84532,
-  name: 'Base Sepolia',
-  rpcUrl: 'https://sepolia.base.org',
-  blockExplorer: 'https://sepolia.basescan.org',
-  currency: {
-    name: 'Ethereum',
-    symbol: 'ETH',
-    decimals: 18
-  }
-}
+// AgentKit Utilities
+export {
+  createTransactionAgent,
+  processTransactionRequest,
+  extractTransactionDetails,
+  isTransactionRequest
+} from './utils/agentKit'
 
-/**
- * Gets a network object by chain ID
- * @param {number} chainId - The chain ID to look up
- * @returns {Object|null} - The network object or null if not found
- */
-export function getNetworkByChainId(chainId) {
-  if (!chainId) return null;
-  
-  const networks = {
-    [BASE_MAINNET.id]: BASE_MAINNET,
-    [BASE_SEPOLIA.id]: BASE_SEPOLIA
-  };
-  
-  return networks[chainId] || null;
-}
+// BaseName Utilities
+export {
+  resolveBaseName as resolveBaseNameFromBaseName,
+  lookupBaseName as lookupBaseNameFromBaseName,
+} from './utils/baseName'

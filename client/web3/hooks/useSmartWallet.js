@@ -7,11 +7,9 @@ import {
   storeSmartWallet,
   getStoredSmartWallet,
   clearStoredSmartWallet,
-  hasStoredSmartWallet,
-  getNetworkByChainId,
-  BASE_MAINNET,
-  BASE_SEPOLIA
-} from '../../../web3'
+  hasStoredSmartWallet
+} from '../utils/smartWallet'
+import { getNetworkByChainId, BASE_MAINNET, BASE_SEPOLIA } from '../config/networks'
 
 /**
  * Custom hook for Smart Wallet functionality

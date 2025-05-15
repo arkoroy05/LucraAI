@@ -8,7 +8,8 @@ import { useBaseName } from '../hooks/useBaseName'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { Wallet, Plus, Trash2, ExternalLink, RefreshCw, ArrowUpDown, Tag } from 'lucide-react'
-import { formatAddressOrName, getExplorerUrl } from '../../../web3'
+import { formatAddressOrName } from '../utils/baseNameResolver'
+import { getExplorerUrl } from '../config/networks'
 import { FundSmartWallet } from './FundSmartWallet'
 
 /**

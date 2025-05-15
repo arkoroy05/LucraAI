@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useTransactions } from '../hooks/useTransactions'
-import { formatAddressOrName } from '../../../web3'
+import { formatAddressOrName } from '../utils/baseNameResolver'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, Check, AlertCircle } from 'lucide-react'

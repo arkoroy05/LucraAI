@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useBalance, useReadContract, useChainId } from 'wagmi'
 import { formatBalance, formatTokenAmount } from '../utils/balanceUtils'
-import { getNetworkByChainId, BASE_SEPOLIA } from '../../../web3'
-import { createTransactionAgent } from '../../../web3/utils/agentKit'
+import { getNetworkByChainId, BASE_SEPOLIA } from '../config/networks'
+import { createTransactionAgent } from '../utils/agentKit'
 
 /**
  * Custom hook to fetch wallet balances

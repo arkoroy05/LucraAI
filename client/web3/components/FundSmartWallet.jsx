@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { motion } from 'framer-motion'
 import { ArrowUpDown, AlertCircle, CheckCircle } from 'lucide-react'
-import { formatAddressOrName } from '../../../web3'
+import { formatAddressOrName } from '../utils/baseNameResolver'
 
 /**
  * FundSmartWallet component that allows users to fund their smart wallet
