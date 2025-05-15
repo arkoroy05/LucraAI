@@ -17,7 +17,7 @@ if (!apiKey) {
 // Initialize the Generative AI client with the API key
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// Function to parse user message and extract payment details
+// Function to parse user message and extract payment details or determine if it's a conversational query
 async function parseUserMessage(message) {
   try {
     // Simple rule-based fallback parser in case the AI model fails
@@ -29,6 +29,26 @@ async function parseUserMessage(message) {
       let recipients = [];
       let splitType = null;
       let note = null;
+      let isConversational = false;
+
+      // Check if this is a conversational query rather than an action
+      const conversationalPatterns = [
+        /^hi\b/i, /^hello\b/i, /^hey\b/i, /^what/i, /^who/i, /^how/i, /^when/i, /^where/i, /^why/i,
+        /^tell me about/i, /^explain/i, /^what is/i, /^who is/i, /^what are/i, /^can you/i,
+        /\?$/, /help me/i, /^thanks/i, /^thank you/i
+      ];
+
+      if (conversationalPatterns.some(pattern => pattern.test(lowerText))) {
+        intent = 'conversation';
+        isConversational = true;
+        return {
+          intent,
+          isConversational,
+          query: text,
+          raw_message: text,
+          parsed_by: 'fallback'
+        };
+      }
 
       // Extract recipients (anything with @ symbol)
       const recipientMatches = text.match(/@(\w+(\.\w+)?)/g);
@@ -69,6 +89,7 @@ async function parseUserMessage(message) {
         recipients,
         split_type: splitType,
         note,
+        isConversational: false,
         raw_message: text,
         parsed_by: 'fallback'
       };
@@ -81,9 +102,9 @@ async function parseUserMessage(message) {
     // Define the system prompt to guide the model
     const systemPrompt = `
       You are an AI assistant for a crypto wallet app called Lucra AI.
-      Your task is to parse user messages and identify payment-related intents.
+      Your task is to parse user messages and identify if they are action-related intents or conversational queries.
 
-      Extract the following information from the user message:
+      For action-related intents, extract the following information:
       1. Intent (send, split, check_balance, transaction_history, chat_history, history, etc.)
       2. Amount (if applicable)
       3. Currency/Token (default to USDC if not specified)
@@ -92,8 +113,15 @@ async function parseUserMessage(message) {
       6. Reason/note for the transaction (if provided)
       7. History type (transactions, chat, all) for history-related intents
       8. Limit (number of records to return) for history-related intents
+      9. isConversational (should be false for action intents)
+
+      For conversational queries (questions, greetings, etc.), set:
+      1. intent: "conversation"
+      2. isConversational: true
+      3. query: the original message
 
       Return the extracted information in JSON format with these fields:
+      For actions:
       {
         "intent": string,
         "amount": number or null,
@@ -102,16 +130,28 @@ async function parseUserMessage(message) {
         "split_type": string or null,
         "note": string or null,
         "history_type": string or null,
-        "limit": number or null
+        "limit": number or null,
+        "isConversational": false
       }
 
-      Examples:
-      - "Send 50 USDC to @alice.base" → {"intent": "send", "amount": 50, "token": "USDC", "recipients": ["alice.base"], "split_type": null, "note": null}
-      - "Split 100 equally between @bob and @charlie for dinner" → {"intent": "split", "amount": 100, "token": "USDC", "recipients": ["bob", "charlie"], "split_type": "equal", "note": "for dinner"}
-      - "Check my balance" → {"intent": "check_balance", "amount": null, "token": null, "recipients": [], "split_type": null, "note": null}
-      - "Show my transaction history" → {"intent": "transaction_history", "history_type": "transactions", "limit": 10}
-      - "Show my chat history" → {"intent": "chat_history", "history_type": "chat", "limit": 10}
-      - "Show my last 5 transactions" → {"intent": "transaction_history", "history_type": "transactions", "limit": 5}
+      For conversations:
+      {
+        "intent": "conversation",
+        "isConversational": true,
+        "query": string
+      }
+
+      Examples of action intents:
+      - "Send 50 USDC to @alice.base" → {"intent": "send", "amount": 50, "token": "USDC", "recipients": ["alice.base"], "split_type": null, "note": null, "isConversational": false}
+      - "Split 100 equally between @bob and @charlie for dinner" → {"intent": "split", "amount": 100, "token": "USDC", "recipients": ["bob", "charlie"], "split_type": "equal", "note": "for dinner", "isConversational": false}
+      - "Check my balance" → {"intent": "check_balance", "amount": null, "token": null, "recipients": [], "split_type": null, "note": null, "isConversational": false}
+      - "Show my transaction history" → {"intent": "transaction_history", "history_type": "transactions", "limit": 10, "isConversational": false}
+
+      Examples of conversational queries:
+      - "Hi there" → {"intent": "conversation", "isConversational": true, "query": "Hi there"}
+      - "What is Lucra AI?" → {"intent": "conversation", "isConversational": true, "query": "What is Lucra AI?"}
+      - "Who created Lucra AI?" → {"intent": "conversation", "isConversational": true, "query": "Who created Lucra AI?"}
+      - "How does Base network work?" → {"intent": "conversation", "isConversational": true, "query": "How does Base network work?"}
     `;
 
     try {
@@ -160,11 +200,21 @@ Extracted JSON:`;
 
         // Ensure all required fields exist
         parsedData.intent = parsedData.intent || null;
-        parsedData.amount = parsedData.amount || null;
-        parsedData.token = parsedData.token || 'USDC';
-        parsedData.recipients = parsedData.recipients || [];
-        parsedData.split_type = parsedData.split_type || null;
-        parsedData.note = parsedData.note || null;
+
+        // Handle conversational vs action intents differently
+        if (parsedData.isConversational || parsedData.intent === 'conversation') {
+          parsedData.isConversational = true;
+          parsedData.intent = 'conversation';
+          parsedData.query = parsedData.query || message;
+        } else {
+          // For action intents, ensure all fields exist
+          parsedData.isConversational = false;
+          parsedData.amount = parsedData.amount || null;
+          parsedData.token = parsedData.token || 'USDC';
+          parsedData.recipients = parsedData.recipients || [];
+          parsedData.split_type = parsedData.split_type || null;
+          parsedData.note = parsedData.note || null;
+        }
 
         // Log the parsed data to console
         console.log('Parsed message (Gemini):', parsedData);
@@ -203,13 +253,94 @@ Extracted JSON:`;
   }
 }
 
+// Function to generate conversational responses
+async function generateConversationalResponse(query) {
+  try {
+    // Create a generative model instance for conversational responses
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    // Define the system prompt for the conversational AI
+    const systemPrompt = `
+      You are Lucra AI, a friendly and helpful AI assistant for a crypto wallet app.
+
+      About Lucra AI:
+      - Lucra AI is a personal onchain CFO that uses natural language to let users send, split, track payments and manage wallets.
+      - Lucra AI was founded by Agnij Dutta and Arko Roy.
+      - Lucra AI integrates with Base and Ethereum blockchain networks.
+      - Lucra AI supports features like sending crypto, splitting payments, tracking transactions, and managing wallets.
+
+      About Base:
+      - Base is a secure, low-cost, builder-friendly Ethereum L2 (Layer 2) built to bring the next billion users onchain.
+      - Base is built on the Optimism OP Stack and is incubated by Coinbase.
+      - Base supports Ethereum-compatible smart contracts and dApps.
+
+      About Ethereum:
+      - Ethereum is a decentralized blockchain platform that enables smart contracts and decentralized applications (dApps).
+      - Ethereum uses a cryptocurrency called Ether (ETH) for transactions.
+
+      Your personality:
+      - You are friendly, helpful, and knowledgeable about crypto.
+      - You use emojis occasionally to appear more friendly (but don't overuse them).
+      - You keep responses concise but informative.
+      - You don't pretend to know things you don't know.
+      - You focus on crypto-related topics and Lucra AI features.
+
+      When responding:
+      - Start responses with "🤖" to indicate you're an AI assistant.
+      - Be conversational and natural.
+      - If asked about features, explain them clearly and concisely.
+      - If asked about technical concepts, explain them in simple terms.
+      - If asked about something you don't know, admit it and offer to help with something else.
+      - Don't make up information about Lucra AI or crypto that isn't in your knowledge.
+
+      Remember: You're a helpful assistant for a crypto wallet app, not a general-purpose AI.
+    `;
+
+    // Combine the system prompt with the user query
+    const combinedPrompt = `${systemPrompt}
+
+    User query: "${query}"
+
+    Your response (start with 🤖):`;
+
+    // Generate the response
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: combinedPrompt }] }],
+      generationConfig: {
+        temperature: 0.7, // Higher temperature for more creative responses
+        topP: 0.9,
+        topK: 40,
+        maxOutputTokens: 1024,
+      },
+    });
+
+    // Get the response text
+    let responseText = result.response.text().trim();
+
+    // Ensure the response starts with the robot emoji
+    if (!responseText.startsWith('🤖')) {
+      responseText = '🤖 ' + responseText;
+    }
+
+    return responseText;
+  } catch (error) {
+    console.error('Error generating conversational response:', error);
+    return '🤖 I apologize, but I encountered an issue processing your request. How else can I assist you with your crypto needs?';
+  }
+}
+
 // Function to generate AI response based on parsed data
 async function generateAIResponse(parsedData, walletAddress) {
-  const { intent, amount, token, recipients, split_type, note, error, history_type, limit } = parsedData;
+  const { intent, amount, token, recipients, split_type, note, error, history_type, limit, isConversational, query } = parsedData;
 
   // If there was an error in parsing
   if (error) {
-    return `I'm sorry, I couldn't understand that request. Could you please rephrase it?`;
+    return `🤖 I'm sorry, I couldn't understand that request. Could you please rephrase it?`;
+  }
+
+  // Handle conversational queries
+  if (isConversational || intent === 'conversation') {
+    return await generateConversationalResponse(query);
   }
 
   // Generate response based on intent
@@ -219,7 +350,7 @@ async function generateAIResponse(parsedData, walletAddress) {
         ? recipients.map(r => `@${r}`).join(' and ')
         : 'the recipient';
 
-      return `I've prepared a transaction to send ${amount} ${token} to ${recipientText}${note ? ` ${note}` : ''}. Would you like to confirm this transaction?`;
+      return `🤖 I've prepared a transaction to send ${amount} ${token} to ${recipientText}${note ? ` ${note}` : ''}. Would you like to confirm this transaction?`;
 
     case 'split':
       const splitRecipients = recipients && recipients.length > 0
@@ -227,7 +358,7 @@ async function generateAIResponse(parsedData, walletAddress) {
         : 'the recipients';
       const splitTypeText = split_type === 'equal' ? 'equally' : 'as specified';
 
-      return `I'll split ${amount} ${token} ${splitTypeText} between ${splitRecipients}${note ? ` ${note}` : ''}. Is this correct?`;
+      return `🤖 I'll split ${amount} ${token} ${splitTypeText} between ${splitRecipients}${note ? ` ${note}` : ''}. Is this correct?`;
 
     case 'check_balance':
       // We'll fetch the actual balance from the client side
@@ -266,7 +397,7 @@ async function generateAIResponse(parsedData, walletAddress) {
           console.error('Error handling user in check_balance:', error);
         }
       }
-      return `__FETCH_BALANCE__`;
+      return `🤖 __FETCH_BALANCE__`;
 
     case 'transaction_history':
     case 'chat_history':
@@ -287,12 +418,12 @@ async function generateAIResponse(parsedData, walletAddress) {
           if (historyError) {
             console.error('Error fetching history:', historyError);
             // Fallback response if API call fails
-            return `I'm having trouble retrieving your ${historyType === 'transactions' ? 'transaction' : historyType === 'chat' ? 'chat' : ''} history right now. Please try again later.`;
+            return `🤖 I'm having trouble retrieving your ${historyType === 'transactions' ? 'transaction' : historyType === 'chat' ? 'chat' : ''} history right now. Please try again later.`;
           }
 
           if (historyType === 'transactions') {
             if (!data || data.length === 0) {
-              return `You don't have any transaction history yet. Once you make transactions, they'll appear here.`;
+              return `🤖 You don't have any transaction history yet. Once you make transactions, they'll appear here.`;
             }
 
             let totalAmount = 0;
@@ -302,35 +433,35 @@ async function generateAIResponse(parsedData, walletAddress) {
               if (tx.amount) totalAmount += parseFloat(tx.amount);
             });
 
-            return `Here's your recent transaction history. You've made ${data.length} transactions, with the most recent on ${recentDate.toLocaleDateString()}, totaling approximately ${totalAmount.toFixed(2)} ${data[0].token || 'USDC'}.`;
+            return `🤖 Here's your recent transaction history. You've made ${data.length} transactions, with the most recent on ${recentDate.toLocaleDateString()}, totaling approximately ${totalAmount.toFixed(2)} ${data[0].token || 'USDC'}.`;
           } else if (historyType === 'chat') {
             if (!data || data.length === 0) {
-              return `You don't have any chat history yet. As we converse, your chat history will be saved here.`;
+              return `🤖 You don't have any chat history yet. As we converse, your chat history will be saved here.`;
             }
 
             const recentDate = new Date(data[0].created_at);
-            return `I found ${data.length} messages in your chat history, with the most recent from ${recentDate.toLocaleDateString()}.`;
+            return `🤖 I found ${data.length} messages in your chat history, with the most recent from ${recentDate.toLocaleDateString()}.`;
           } else {
             // Combined history
             if (!data || data.length === 0) {
-              return `You don't have any history yet. As you use Lucra AI, your history will be saved here.`;
+              return `🤖 You don't have any history yet. As you use Lucra AI, your history will be saved here.`;
             }
 
             const txCount = data.filter(item => item.transaction_type).length;
             const chatCount = data.filter(item => item.is_user !== undefined).length;
 
-            return `I found ${data.length} items in your history: ${txCount} transactions and ${chatCount} chat messages.`;
+            return `🤖 I found ${data.length} items in your history: ${txCount} transactions and ${chatCount} chat messages.`;
           }
         } catch (error) {
           console.error('Error fetching history:', error);
-          return `I'm having trouble retrieving your history right now. Please try again later.`;
+          return `🤖 I'm having trouble retrieving your history right now. Please try again later.`;
         }
       } else {
-        return `Please connect your wallet to view your ${intent === 'transaction_history' ? 'transaction' : intent === 'chat_history' ? 'chat' : ''} history.`;
+        return `🤖 Please connect your wallet to view your ${intent === 'transaction_history' ? 'transaction' : intent === 'chat_history' ? 'chat' : ''} history.`;
       }
 
     default:
-      return `I understand you want to ${intent || 'do something'}. How can I help you with that?`;
+      return `🤖 I understand you want to ${intent || 'do something'}. How can I help you with that?`;
   }
 }
 
@@ -460,7 +591,7 @@ export async function POST(req) {
         raw_message: lastUserMessage.content
       };
 
-      const fallbackResponse = 'I understand you said: "' + lastUserMessage.content + '". How can I help you with that?';
+      const fallbackResponse = '🤖 I understand you said: "' + lastUserMessage.content + '". How can I help you with that?';
 
       // Store the messages in Supabase if wallet address is provided
       if (walletAddress) {
