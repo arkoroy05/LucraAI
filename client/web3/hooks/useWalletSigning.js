@@ -15,7 +15,7 @@ export function useWalletSigning() {
   const [verificationError, setVerificationError] = useState(null)
 
   // Use wagmi's useSignMessage hook
-  const { signMessage, isPending: isSignPending, error: signError } = useSignMessage()
+  const { signMessage, signMessageAsync, isPending: isSignPending, error: signError } = useSignMessage()
 
   /**
    * Generate a verification message for the user to sign
@@ -44,15 +44,23 @@ export function useWalletSigning() {
       let signature
       try {
         console.log('Requesting signature for message:', message);
-        signature = await signMessage({ message });
+        console.log('signMessageAsync function type:', typeof signMessageAsync);
+
+        // In wagmi v2, signMessageAsync is a function that returns a promise with the signature
+        console.log('About to call signMessageAsync...');
+        signature = await signMessageAsync({ message });
+        console.log('signMessageAsync call completed');
         console.log('Signature received:', signature);
+        console.log('Signature type:', typeof signature);
       } catch (signError) {
         console.error('Error during message signing:', signError);
+        console.error('Error details:', JSON.stringify(signError, Object.getOwnPropertyNames(signError)));
         // Don't throw here, just set the error and return false
         setVerificationError(signError.message || 'Failed to sign message');
         return false;
       }
 
+      // Check if we got a signature back
       if (!signature) {
         console.error('No signature returned from signMessage');
         setVerificationError('Failed to sign message - no signature returned');
@@ -141,7 +149,7 @@ export function useWalletSigning() {
     } finally {
       setIsVerifying(false)
     }
-  }, [generateVerificationMessage, signMessage])
+  }, [generateVerificationMessage, signMessageAsync])
 
   /**
    * Check if a wallet has been verified
