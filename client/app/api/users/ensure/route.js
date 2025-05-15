@@ -29,7 +29,7 @@ export async function POST(req) {
       .select('id')
       .eq('wallet_address', normalizedAddress)
       .maybeSingle();
-    
+
     if (userError) {
       console.error('Error checking for user:', userError);
       return new Response(
@@ -40,11 +40,11 @@ export async function POST(req) {
         }
       );
     }
-    
+
     // If user exists, return success
     if (existingUser) {
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           message: 'User already exists',
           user: existingUser
         }),
@@ -54,12 +54,14 @@ export async function POST(req) {
         }
       );
     }
-    
-    // User doesn't exist, create them
+
+    // User doesn't exist, create them with a UUID
+    const uuid = crypto.randomUUID();
     const { data: newUser, error: insertError } = await supabaseServer
       .from('users')
       .insert([
         {
+          id: uuid,
           wallet_address: normalizedAddress,
           wallet_type: walletType || 'wagmi',
           created_at: new Date().toISOString(),
@@ -67,7 +69,7 @@ export async function POST(req) {
         }
       ])
       .select();
-    
+
     if (insertError) {
       console.error('Error creating user:', insertError);
       return new Response(
@@ -78,9 +80,9 @@ export async function POST(req) {
         }
       );
     }
-    
+
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         message: 'User created successfully',
         user: newUser
       }),

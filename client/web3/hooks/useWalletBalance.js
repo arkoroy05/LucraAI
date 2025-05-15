@@ -94,7 +94,7 @@ export function useWalletBalance(tokenAddress) {
     }
 
     // Prevent excessive fetching
-    if (fetchCountRef.current > 3) {
+    if (fetchCountRef.current > 5) {
       console.log('Already fetched balance multiple times, skipping to prevent excessive requests');
       setIsAgentLoading(false);
       return { balance: defaultBalance }; // Return a non-zero balance for better UX
@@ -106,6 +106,8 @@ export function useWalletBalance(tokenAddress) {
 
       // Add a small delay to prevent rapid successive calls
       await new Promise(resolve => setTimeout(resolve, 100));
+
+      console.log(`Fetching balance for address: ${address} on network: ${network?.name || 'unknown'}`);
 
       // Create an agent for handling the balance request
       const agent = createTransactionAgent({
@@ -125,8 +127,10 @@ export function useWalletBalance(tokenAddress) {
         // Try to fetch the balance, but use the default if it times out
         let balanceResult;
         try {
+          console.log('Calling agent getBalance handler...');
           const fetchPromise = agent.capabilities.getBalance.handler();
           balanceResult = await Promise.race([fetchPromise, timeoutPromise]);
+          console.log('Balance result:', balanceResult);
         } catch (timeoutError) {
           console.warn('Balance fetch timed out, using default balance:', timeoutError.message);
           balanceResult = defaultBalance;
@@ -143,6 +147,20 @@ export function useWalletBalance(tokenAddress) {
             setAgentBalances({
               ETH: balanceResult.balance,
             });
+
+            // Also update the formatted native balance for better UI consistency
+            if (parsedBalance > 0) {
+              setFormattedNativeBalance(balanceResult.balance);
+              setBalances(prev => ({
+                ...prev,
+                native: {
+                  ...prev.native,
+                  formatted: balanceResult.balance,
+                  display: `${balanceResult.balance} ETH`
+                }
+              }));
+            }
+
             return balanceResult;
           } else {
             console.warn('Received invalid balance format:', balanceResult.balance);
@@ -173,7 +191,7 @@ export function useWalletBalance(tokenAddress) {
         setIsAgentLoading(false);
       }, 500);
     }
-  }, [address, isConnected, useTestnet])
+  }, [address, isConnected, useTestnet, network?.name])
 
   // Fetch agent balance when dependencies change
   // Using a ref to track if we've already fetched the balance to prevent infinite loops
@@ -195,7 +213,7 @@ export function useWalletBalance(tokenAddress) {
       isConnected &&
       address &&
       (!hasFetchedRef.current || timeSinceLastFetch > 30000) &&
-      fetchCountRef.current < 2;
+      fetchCountRef.current < 5;
 
     if (shouldFetch) {
       console.log(`Fetching balance (attempt ${fetchCountRef.current + 1})`);
@@ -205,7 +223,18 @@ export function useWalletBalance(tokenAddress) {
 
       // Fetch balance with a slight delay to prevent race conditions
       const timer = setTimeout(() => {
-        fetchAgentBalance();
+        fetchAgentBalance().then(result => {
+          console.log('Balance fetch completed with result:', result);
+
+          // Force a refresh of the native balance as well
+          if (refetchNativeBalance) {
+            refetchNativeBalance().catch(err => {
+              console.warn('Error refreshing native balance:', err);
+            });
+          }
+        }).catch(err => {
+          console.error('Error in fetchAgentBalance:', err);
+        });
       }, 100);
 
       return () => clearTimeout(timer);
@@ -215,6 +244,14 @@ export function useWalletBalance(tokenAddress) {
     if (!isConnected || !address) {
       hasFetchedRef.current = false;
       fetchCountRef.current = 0;
+    } else if (address && chainId && fetchCountRef.current === 0) {
+      // If we have an address and chain but haven't fetched yet, trigger a fetch
+      console.log('Address and chain available but no fetch yet, triggering initial fetch');
+      const timer = setTimeout(() => {
+        fetchAgentBalance();
+      }, 500);
+
+      return () => clearTimeout(timer);
     }
 
     // Cleanup function to clear any pending timeouts when component unmounts
@@ -223,7 +260,7 @@ export function useWalletBalance(tokenAddress) {
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-  }, [isConnected, address, chainId, fetchAgentBalance])
+  }, [isConnected, address, chainId, fetchAgentBalance, refetchNativeBalance])
 
   // Refresh balances with debounce to prevent multiple calls
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -244,20 +281,34 @@ export function useWalletBalance(tokenAddress) {
     }
 
     // Set a default balance immediately for better UX
-    setAgentBalances(prev => prev.ETH ? prev : { ETH: '0.01' });
+    setAgentBalances(prev => prev.ETH ? prev : { ETH: '0.1' });
 
     // Create a sequence of balance fetch operations with delays between them
     const fetchSequence = async () => {
       try {
+        console.log('Starting balance refresh sequence');
+
         // First refresh native balance
-        await refetchNativeBalance();
+        try {
+          console.log('Refreshing native balance...');
+          const nativeResult = await refetchNativeBalance();
+          console.log('Native balance refresh result:', nativeResult);
+        } catch (nativeError) {
+          console.error('Error refreshing native balance:', nativeError);
+        }
 
         // Short delay between operations
         await new Promise(resolve => setTimeout(resolve, 200));
 
         // Then refresh token balance if available
         if (tokenAddress) {
-          await refetchTokenBalance();
+          try {
+            console.log('Refreshing token balance...');
+            const tokenResult = await refetchTokenBalance();
+            console.log('Token balance refresh result:', tokenResult);
+          } catch (tokenError) {
+            console.error('Error refreshing token balance:', tokenError);
+          }
           await new Promise(resolve => setTimeout(resolve, 200));
         }
 
@@ -269,10 +320,33 @@ export function useWalletBalance(tokenAddress) {
           lastFetchTimeRef.current = Date.now();
 
           // Attempt to fetch agent balance
-          await fetchAgentBalance().catch(err => {
-            console.error('Error refreshing agent balance:', err);
-          });
+          try {
+            console.log('Refreshing agent balance...');
+            const agentResult = await fetchAgentBalance();
+            console.log('Agent balance refresh result:', agentResult);
+
+            // If we got a valid agent balance, update the native balance display as well
+            if (agentResult && agentResult.balance) {
+              const parsedBalance = parseFloat(agentResult.balance);
+              if (!isNaN(parsedBalance) && parsedBalance > 0) {
+                console.log('Updating native balance display with agent balance:', agentResult.balance);
+                setFormattedNativeBalance(agentResult.balance);
+                setBalances(prev => ({
+                  ...prev,
+                  native: {
+                    ...prev.native,
+                    formatted: agentResult.balance,
+                    display: `${agentResult.balance} ETH`
+                  }
+                }));
+              }
+            }
+          } catch (agentError) {
+            console.error('Error refreshing agent balance:', agentError);
+          }
         }
+
+        console.log('Balance refresh sequence completed');
       } catch (error) {
         console.error('Error in balance refresh sequence:', error);
       } finally {

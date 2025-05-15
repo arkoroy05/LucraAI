@@ -202,9 +202,22 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
               throw new Error('Wallet address is required to fetch balance');
             }
 
+            console.log(`Fetching balance for wallet: ${walletAddress} on ${chain.name}`);
+
+            // For development, always return a mock balance immediately
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('Development mode: Using mock balance');
+              return {
+                balance: '0.1',
+                token: 'ETH',
+                chain: chain.name,
+                isMock: true
+              };
+            }
+
             // Get the balance from the client with a longer timeout
             const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Balance fetch timed out')), 15000)
+              setTimeout(() => reject(new Error('Balance fetch timed out')), 30000)
             );
 
             // For development, return a mock balance immediately to prevent timeouts
@@ -212,9 +225,40 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
             const mockBalance = BigInt('100000000000000000'); // 0.1 ETH
 
             try {
-              const fetchPromise = client.getBalance({ address: walletAddress });
-              const balance = await Promise.race([fetchPromise, timeoutPromise]);
-              console.log('Successfully fetched balance:', balance.toString());
+              // Make a direct RPC call to get the balance
+              const rpcUrl = useTestnet
+                ? (process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org')
+                : (process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL || 'https://mainnet.base.org');
+
+              const response = await fetch(rpcUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: Date.now(),
+                  method: 'eth_getBalance',
+                  params: [walletAddress, 'latest'],
+                }),
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+
+              const data = await response.json();
+
+              if (data.error) {
+                throw new Error(`RPC error: ${data.error.message || JSON.stringify(data.error)}`);
+              }
+
+              // Convert hex string to BigInt
+              const balanceHex = data.result;
+              const balance = BigInt(balanceHex);
+
+              console.log(`Successfully fetched balance for ${walletAddress}: ${balance.toString()}`);
+
               return {
                 balance: formatEther(balance),
                 token: 'ETH',
@@ -234,7 +278,7 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
             console.error('Error getting balance:', error);
             // Return a fallback balance in case of error
             return {
-              balance: '0.01', // Return a small non-zero balance for better UX
+              balance: '0.1', // Return a small non-zero balance for better UX
               token: 'ETH',
               chain: chain.name,
             };

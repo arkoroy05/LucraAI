@@ -232,6 +232,40 @@ async function generateAIResponse(parsedData, walletAddress) {
     case 'check_balance':
       // We'll fetch the actual balance from the client side
       // and replace this placeholder in the UI
+      if (walletAddress) {
+        try {
+          // Check if the user exists in the database
+          const { data: user, error: userError } = await supabaseServer
+            .from('users')
+            .select('id')
+            .eq('wallet_address', walletAddress)
+            .maybeSingle();
+
+          if (userError) {
+            console.error('Error checking user:', userError);
+          }
+
+          // If user doesn't exist, create them
+          if (!user && !userError) {
+            const { error: createError } = await supabaseServer
+              .from('users')
+              .insert([
+                {
+                  wallet_address: walletAddress,
+                  wallet_type: 'wagmi',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }
+              ]);
+
+            if (createError) {
+              console.error('Error creating user:', createError);
+            }
+          }
+        } catch (error) {
+          console.error('Error handling user in check_balance:', error);
+        }
+      }
       return `__FETCH_BALANCE__`;
 
     case 'transaction_history':

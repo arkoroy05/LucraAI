@@ -41,10 +41,61 @@ export function useWalletSigning() {
       const message = generateVerificationMessage(address)
 
       // Request the user to sign the message
-      const signature = await signMessage({ message })
+      let signature
+      try {
+        console.log('Requesting signature for message:', message);
+        signature = await signMessage({ message });
+        console.log('Signature received:', signature);
+      } catch (signError) {
+        console.error('Error during message signing:', signError);
+        // Don't throw here, just set the error and return false
+        setVerificationError(signError.message || 'Failed to sign message');
+        return false;
+      }
 
       if (!signature) {
-        throw new Error('Failed to sign message')
+        console.error('No signature returned from signMessage');
+        setVerificationError('Failed to sign message - no signature returned');
+        return false;
+      }
+
+      // Normalize the wallet address to lowercase
+      const normalizedAddress = address.toLowerCase()
+
+      // First, check if user exists in the users table
+      const { data: userData, error: userCheckError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('wallet_address', normalizedAddress)
+        .maybeSingle()
+
+      // If user doesn't exist, create them via the API endpoint
+      if (!userData && !userCheckError) {
+        try {
+          console.log('Creating user via API endpoint');
+          const response = await fetch('/api/users/ensure', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              walletAddress: normalizedAddress,
+              walletType: 'wagmi'
+            })
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Error creating user via API:', errorText);
+            // Continue anyway to store the signature
+          } else {
+            const result = await response.json();
+            console.log('User created successfully:', result);
+          }
+        } catch (apiError) {
+          console.error('Error calling user API:', apiError);
+          // Continue anyway to store the signature
+        }
       }
 
       // Store the signature in Supabase
@@ -52,7 +103,7 @@ export function useWalletSigning() {
         .from('wallet_signatures')
         .upsert([
           {
-            wallet_address: address,
+            wallet_address: normalizedAddress,
             signature,
             message,
             created_at: new Date().toISOString(),
@@ -66,17 +117,19 @@ export function useWalletSigning() {
       }
 
       // Update the user record to mark as verified
-      const { error: userError } = await supabase
-        .from('users')
-        .update({
-          is_verified: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('wallet_address', address)
+      if (userData || !userCheckError) {
+        const { error: userError } = await supabase
+          .from('users')
+          .update({
+            is_verified: true,
+            updated_at: new Date().toISOString()
+          })
+          .eq('wallet_address', normalizedAddress)
 
-      if (userError) {
-        console.error('Error updating user verification status:', userError)
-        // Don't throw here, as the signature was stored successfully
+        if (userError) {
+          console.error('Error updating user verification status:', userError)
+          // Don't throw here, as the signature was stored successfully
+        }
       }
 
       setIsVerified(true)
@@ -99,12 +152,16 @@ export function useWalletSigning() {
     try {
       if (!address) return false
 
+      // Normalize the wallet address to lowercase
+      const normalizedAddress = address.toLowerCase();
+
       // Check if the wallet has a signature in the database
+      // Use maybeSingle instead of single to avoid 406 errors
       const { data, error } = await supabase
         .from('wallet_signatures')
         .select('*')
-        .eq('wallet_address', address)
-        .single()
+        .eq('wallet_address', normalizedAddress)
+        .maybeSingle()
 
       if (error) {
         console.error('Error checking wallet verification:', error)
