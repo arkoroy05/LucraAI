@@ -11,7 +11,7 @@ import { Wallet, X, CheckCircle, AlertCircle } from 'lucide-react'
  * ConnectWallet component that provides a button to connect wallet
  * and displays a modal with wallet options when clicked
  */
-export function ConnectWallet() {
+export function ConnectWallet({ onModalToggle }) { // Accept onModalToggle prop
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
   const [connectionError, setConnectionError] = useState(null)
@@ -49,7 +49,11 @@ export function ConnectWallet() {
 
   // Toggle the wallet connection modal
   const toggleModal = () => {
-    setIsModalOpen(!isModalOpen)
+    const newModalState = !isModalOpen;
+    setIsModalOpen(newModalState);
+    if (onModalToggle) {
+      onModalToggle(newModalState); // Call the callback
+    }
   }
 
   // Connect with the selected wallet and close the modal
@@ -59,7 +63,7 @@ export function ConnectWallet() {
       await connectFunction()
       // Only close modal on successful connection
       if (isConnected) {
-        setIsModalOpen(false)
+        // setIsModalOpen(false) // Managed by useEffect below
       }
     } catch (error) {
       console.error('Error connecting wallet:', error)
@@ -96,7 +100,10 @@ export function ConnectWallet() {
   // Close modal when connection is successful
   useEffect(() => {
     if (isConnected && isModalOpen) {
-      setIsModalOpen(false)
+      setIsModalOpen(false);
+      if (onModalToggle) {
+        onModalToggle(false); // Update parent state
+      }
 
       // Check if the wallet is already verified
       if (address) {
@@ -104,13 +111,16 @@ export function ConnectWallet() {
           .then(verified => {
             if (!verified) {
               // If not verified, show the signing prompt
-              setShowSigningPrompt(true)
+              setShowSigningPrompt(true);
+              if (onModalToggle) {
+                onModalToggle(true); // Verification modal is also a modal
+              }
             }
           })
           .catch(err => console.error('Error checking wallet verification:', err))
       }
     }
-  }, [isConnected, isModalOpen, address, checkWalletVerification])
+  }, [isConnected, isModalOpen, address, checkWalletVerification, onModalToggle])
 
   // Handle wallet verification
   const handleVerifyWallet = async () => {
@@ -119,7 +129,10 @@ export function ConnectWallet() {
     try {
       const success = await verifyWalletOwnership(address)
       if (success) {
-        setShowSigningPrompt(false)
+        setShowSigningPrompt(false);
+        if (onModalToggle) {
+          onModalToggle(false); // Close verification modal
+        }
       }
     } catch (error) {
       console.error('Error verifying wallet:', error)
@@ -172,15 +185,23 @@ export function ConnectWallet() {
         </Button>
       </motion.div>
 
-      {/* Wallet Connection Modal */}
+      {/* Wallet Connection Modal - Positioned at the top */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[999999] flex items-start justify-center pt-20 bg-black/50 backdrop-blur-sm" 
+             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'auto', zIndex: 999999 }}>
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-auto my-auto relative"
-            style={{ maxHeight: '90vh', overflowY: 'auto' }}
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-4 relative"
+            style={{ 
+              maxHeight: '80vh', 
+              overflowY: 'auto', 
+              position: 'relative', 
+              pointerEvents: 'auto',
+              zIndex: 999999,
+              isolation: 'isolate'
+            }}
           >
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-medium text-white">Connect Wallet</h3>
@@ -253,22 +274,30 @@ export function ConnectWallet() {
         </div>
       )}
 
-      {/* Wallet Verification Modal */}
+      {/* Wallet Verification Modal - Also positioned at the top */}
       {showSigningPrompt && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[999999] flex items-start justify-center pt-20 bg-black/50 backdrop-blur-sm" 
+             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'auto', zIndex: 999999 }}>
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-auto my-auto relative"
-            style={{ maxHeight: '90vh', overflowY: 'auto' }}
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="bg-[#0B0118] border border-white/10 rounded-xl p-6 max-w-md w-full mx-4 relative"
+            style={{ 
+              maxHeight: '80vh', 
+              overflowY: 'auto', 
+              position: 'relative', 
+              pointerEvents: 'auto',
+              zIndex: 999999,
+              isolation: 'isolate'
+            }}
           >
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-medium text-white">Verify Wallet Ownership</h3>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setShowSigningPrompt(false)}
+                onClick={closeVerificationModal} // Use the new handler
                 className="text-white/60 hover:text-white hover:bg-white/10"
               >
                 <X className="h-5 w-5" />
@@ -306,7 +335,7 @@ export function ConnectWallet() {
               <Button
                 variant="ghost"
                 className="w-full mt-3 text-white/60 hover:text-white hover:bg-white/10"
-                onClick={() => setShowSigningPrompt(false)}
+                onClick={closeVerificationModal} // Use the new handler
               >
                 Skip for Now
               </Button>

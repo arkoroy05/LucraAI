@@ -9,6 +9,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { motion } from "framer-motion"
 import dynamic from "next/dynamic"
 import { ConnectWallet } from "@/web3"
+import { useState } from 'react'; 
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -25,11 +26,14 @@ const slideIn = {
 const SplineViewer = dynamic(() => import("@/components/SplineViewer"), {
   ssr: false,
   loading: () => (
+    // This loading state will show when SplineViewer is initially loading OR when it's not rendered due to modal
     <div className="relative h-[700px] w-[120%] -ml-[10%] overflow-hidden bg-white/5 backdrop-blur-lg rounded-xl animate-pulse" />
   ),
 })
 
 export default function Home() {
+  const [isModalActuallyOpen, setIsModalActuallyOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-[#0B0118] text-white overflow-hidden relative font-sans antialiased">
       {/* Background Elements */}
@@ -91,7 +95,7 @@ export default function Home() {
                 Member Perks
               </Button>
             </motion.div>
-            <ConnectWallet />
+            {/* <ConnectWallet onModalToggle={setIsModalActuallyOpen} /> */}
           </div>
         </div>
       </motion.header>
@@ -131,9 +135,13 @@ export default function Home() {
                     Get Started
                   </Button>
                 </Link>
-                <Button variant="outline" className="border-white/20 text-white hover:bg-white/10 px-8 py-6 text-sm font-light tracking-wide">
+                {/* <Button variant="outline" className="border-white/20 text-white hover:bg-white/10 px-8 py-6 text-sm font-light tracking-wide">
                   Learn More
-                </Button>
+                </Button> */}
+                <ConnectWallet 
+                  onModalToggle={setIsModalActuallyOpen} 
+                  className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-8 py-6 text-sm font-light tracking-wide"
+                />
               </motion.div>
             </div>
             <div className="md:w-1/2">
@@ -141,7 +149,7 @@ export default function Home() {
                 variants={fadeIn}
                 className="relative"
               >
-                <SplineViewer />
+                <SplineViewer interactive={!isModalActuallyOpen} />
               </motion.div>
             </div>
           </div>
