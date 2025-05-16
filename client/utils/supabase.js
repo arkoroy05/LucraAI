@@ -474,59 +474,38 @@ export const addMessageToConversation = async (conversationId, userId, message, 
 
     console.log('Using numeric conversation ID:', numericConversationId);
 
-    // Call the add_message_to_conversation RPC function
-    const { data, error } = await supabase.rpc('add_message_to_conversation', {
-      p_conversation_id: numericConversationId,
-      p_user_id: userId,
-      p_message: message,
-      p_is_user: isUser,
-      p_metadata: metadata
-    })
+    // Skip the RPC call and directly insert into the chat_history table
+    // This avoids the issue with multiple function signatures in the database
+    try {
+      const { data: newMessage, error: insertError } = await supabase
+        .from('chat_history')
+        .insert({
+          user_id: userId,
+          conversation_id: numericConversationId,
+          message: message,
+          is_user: isUser,
+          created_at: new Date().toISOString(),
+          metadata: metadata
+        })
+        .select('id')
+        .single();
 
-    if (error) {
-      console.error('Error in add_message_to_conversation RPC:', error);
-
-      // Check if this is a "function not found" error, which can happen if the function was just created
-      if (error.message && error.message.includes('function not found')) {
-        console.error('Function add_message_to_conversation not found. It may need to be created in the database.')
-
-        // Fallback: Add the message directly to the chat_history table
-        try {
-          const { data: newMessage, error: insertError } = await supabase
-            .from('chat_history')
-            .insert({
-              user_id: userId,
-              conversation_id: numericConversationId,
-              message: message,
-              is_user: isUser,
-              created_at: new Date().toISOString(),
-              metadata: metadata
-            })
-            .select('id')
-            .single();
-
-          if (insertError) {
-            console.error('Error adding message directly:', insertError)
-            return null
-          }
-
-          // Update the conversation's updated_at timestamp
-          await supabase
-            .from('chat_conversations')
-            .update({ updated_at: new Date().toISOString() })
-            .eq('id', numericConversationId);
-
-          return newMessage?.id || null
-        } catch (fallbackError) {
-          console.error('Error in fallback message addition:', fallbackError)
-        }
-      } else {
-        console.error('Error adding message to conversation:', error)
+      if (insertError) {
+        console.error('Error adding message directly:', insertError)
+        return null
       }
+
+      // Update the conversation's updated_at timestamp
+      await supabase
+        .from('chat_conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', numericConversationId);
+
+      return newMessage?.id || null
+    } catch (error) {
+      console.error('Error adding message to conversation:', error)
       return null
     }
-
-    return data
   } catch (error) {
     console.error('Error adding message to conversation:', error)
     return null

@@ -450,7 +450,7 @@ export default function ChatInterface() {
                   } else if (walletType === 'main') {
                     balanceText = `Your main wallet balance is ${displayBalance}.`;
                   } else {
-                    // Both wallets
+                    // Both wallets - show main wallet first, then smart wallet
                     balanceText = `Your main wallet balance is ${displayBalance}. Your smart wallet balance is ${smartWalletBalance} ETH.`;
                   }
 
@@ -1042,9 +1042,9 @@ export default function ChatInterface() {
                                   ? (() => {
                                       const walletType = message.content.match(/__FETCH_BALANCE__:(\w+)__/)[1];
                                       if (!isConnected) return "Please connect your wallet to check your balance.";
-                                      if (walletType === 'smart') return `Your smart wallet balance is loading...`;
+                                      if (walletType === 'smart') return `Your smart wallet balance is ${balances?.agent?.balance || '0'} ETH.`;
                                       if (walletType === 'main') return `Your main wallet balance is ${nativeDisplayBalance}.`;
-                                      return `Your main wallet balance is ${nativeDisplayBalance}. Smart wallet balance is loading...`;
+                                      return `Your main wallet balance is ${nativeDisplayBalance}. Your smart wallet balance is ${balances?.agent?.balance || '0'} ETH.`;
                                     })()
                                   : `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`)
                               : message.content}
