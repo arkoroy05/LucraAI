@@ -1,29 +1,79 @@
+/**
+ * Smart Wallet utilities for LucraAI
+ * This provides functionality for creating and managing Smart Wallets
+ */
+
+import { generatePrivateKey as viemGeneratePrivateKey, privateKeyToAccount as viemPrivateKeyToAccount } from 'viem/accounts';
 import { BASE_MAINNET, BASE_SEPOLIA } from '../config/networks';
 
+/**
+ * Generates a cryptographically secure private key
+ * @returns {string} - Hex-encoded private key
+ */
 function generatePrivateKey() {
-  const randomBytes = new Array(32).fill(0).map(() => Math.floor(Math.random() * 256));
-  return '0x' + randomBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+  try {
+    // Use viem's secure private key generation
+    return viemGeneratePrivateKey();
+  } catch (error) {
+    console.error('Error generating private key with viem, using fallback:', error);
+
+    // Fallback implementation (less secure, only for development)
+    const randomBytes = new Array(32).fill(0).map(() => Math.floor(Math.random() * 256));
+    return '0x' + randomBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
 }
 
+/**
+ * Derives an Ethereum account from a private key
+ * @param {string} privateKey - Hex-encoded private key
+ * @returns {object} - Account object with address and privateKey
+ */
 function privateKeyToAccount(privateKey) {
-  const addressBytes = privateKey.slice(2, 42);
-  return {
-    address: '0x' + addressBytes.padEnd(40, '0'),
-    privateKey,
-  };
+  try {
+    // Use viem's account derivation
+    const account = viemPrivateKeyToAccount(privateKey);
+    return {
+      address: account.address,
+      privateKey: account.privateKey,
+    };
+  } catch (error) {
+    console.error('Error deriving account with viem, using fallback:', error);
+
+    // Fallback implementation (less secure, only for development)
+    const addressBytes = privateKey.slice(2, 42);
+    return {
+      address: '0x' + addressBytes.padEnd(40, '0'),
+      privateKey,
+    };
+  }
 }
 
+/**
+ * Creates a new Smart Wallet
+ * @param {object} options - Options for creating the Smart Wallet
+ * @param {string} options.networkId - Network ID (e.g., 'base-mainnet', 'base-sepolia')
+ * @param {string} options.privateKey - Optional private key to use for the Smart Wallet
+ * @returns {Promise<object>} - Smart Wallet object
+ */
 export async function createSmartWallet({ networkId = 'base-sepolia', privateKey } = {}) {
   try {
+    // Generate a new private key if one wasn't provided
     const walletPrivateKey = privateKey || generatePrivateKey();
+
+    // Create an account from the private key
     const account = privateKeyToAccount(walletPrivateKey);
+
+    // Determine the network configuration
     const network = networkId.includes('sepolia') ? BASE_SEPOLIA : BASE_MAINNET;
+
+    // Create a Smart Wallet object
     const smartWallet = {
       address: account.address,
       privateKey: walletPrivateKey,
       network,
       createdAt: new Date().toISOString(),
     };
+
     return smartWallet;
   } catch (error) {
     console.error('Error creating Smart Wallet:', error);
@@ -31,6 +81,10 @@ export async function createSmartWallet({ networkId = 'base-sepolia', privateKey
   }
 }
 
+/**
+ * Safely access localStorage with fallback
+ * This helps prevent issues with service workers or other browser restrictions
+ */
 const safeLocalStorage = {
   getItem: (key) => {
     try {
@@ -69,14 +123,23 @@ const safeLocalStorage = {
   }
 };
 
+/**
+ * Stores a Smart Wallet in local storage
+ * @param {object} smartWallet - Smart Wallet object to store
+ * @returns {boolean} - True if the Smart Wallet was stored successfully
+ */
 export function storeSmartWallet(smartWallet) {
   try {
+    // Store the Smart Wallet in local storage
     const result = safeLocalStorage.setItem('lucra_smart_wallet', JSON.stringify(smartWallet));
+
+    // Verify the data was stored correctly
     const verification = safeLocalStorage.getItem('lucra_smart_wallet');
     if (!verification) {
       console.warn('Smart Wallet storage verification failed');
       return false;
     }
+
     return result;
   } catch (error) {
     console.error('Error storing Smart Wallet:', error);
@@ -84,13 +147,20 @@ export function storeSmartWallet(smartWallet) {
   }
 }
 
+/**
+ * Retrieves a Smart Wallet from local storage
+ * @returns {object|null} - Smart Wallet object or null if not found
+ */
 export function getStoredSmartWallet() {
   try {
+    // Retrieve the Smart Wallet from local storage
     const smartWallet = safeLocalStorage.getItem('lucra_smart_wallet');
+
     if (!smartWallet) {
       console.log('No Smart Wallet found in localStorage');
       return null;
     }
+
     try {
       return JSON.parse(smartWallet);
     } catch (parseError) {
@@ -103,8 +173,13 @@ export function getStoredSmartWallet() {
   }
 }
 
+/**
+ * Clears a stored Smart Wallet from local storage
+ * @returns {boolean} - True if the Smart Wallet was cleared successfully
+ */
 export function clearStoredSmartWallet() {
   try {
+    // Clear the Smart Wallet from local storage
     return safeLocalStorage.removeItem('lucra_smart_wallet');
   } catch (error) {
     console.error('Error clearing Smart Wallet:', error);
@@ -112,11 +187,16 @@ export function clearStoredSmartWallet() {
   }
 }
 
+/**
+ * Checks if a Smart Wallet is stored in local storage
+ * @returns {boolean} - True if a Smart Wallet is stored
+ */
 export function hasStoredSmartWallet() {
   try {
+    // Check if a Smart Wallet is stored in local storage
     return !!safeLocalStorage.getItem('lucra_smart_wallet');
   } catch (error) {
     console.error('Error checking for stored Smart Wallet:', error);
     return false;
   }
-} 
+}

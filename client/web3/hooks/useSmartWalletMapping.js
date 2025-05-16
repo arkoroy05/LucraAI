@@ -35,32 +35,7 @@ export function useSmartWalletMapping() {
       setIsLoading(true)
       setError(null)
 
-      // Only try to get wallets from localStorage if explicitly requested or as fallback
-      let localWallets = [];
-      const useLocalStorage = typeof window !== 'undefined' &&
-        (window.location.search.includes('useLocalStorage=true') || window.location.search.includes('useMockWallet=true'));
-
-      if (useLocalStorage) {
-        try {
-          const normalizedAddress = address.toLowerCase();
-          const walletKey = `smart_wallet_${normalizedAddress}`;
-          const storedWallet = localStorage.getItem(walletKey);
-
-          if (storedWallet) {
-            try {
-              const walletData = JSON.parse(storedWallet);
-              console.log('Found wallet in localStorage:', walletData.address);
-              localWallets.push(walletData);
-            } catch (parseError) {
-              console.warn('Error parsing wallet from localStorage:', parseError);
-            }
-          }
-        } catch (storageError) {
-          console.warn('Error accessing localStorage:', storageError);
-        }
-      }
-
-      // Then try to query the database
+      // Query the database first
       try {
         // Query the smart_wallets table for wallets owned by this address
         const { data, error } = await supabase
@@ -71,31 +46,79 @@ export function useSmartWalletMapping() {
 
         if (error) {
           console.warn('Error querying database for wallets:', error);
-        } else if (data && data.length > 0) {
+          throw error; // Let it fall through to the localStorage fallback
+        }
+
+        if (data && data.length > 0) {
           console.log('Found wallets in database:', data.length);
-
-          // Combine with local wallets, removing duplicates
-          const dbAddresses = new Set(data.map(w => w.address));
-          const uniqueLocalWallets = localWallets.filter(w => !dbAddresses.has(w.address));
-
-          setMappedWallets([...data, ...uniqueLocalWallets]);
+          setMappedWallets(data);
           return;
+        } else {
+          console.log('No wallets found in database, checking localStorage');
         }
       } catch (dbError) {
         console.warn('Database query failed:', dbError);
+        // Fall through to localStorage check
       }
 
-      // If we have local wallets but no DB wallets, use the local ones
-      if (localWallets.length > 0) {
-        console.log('Using wallets from localStorage only');
-        setMappedWallets(localWallets);
-      } else {
-        console.log('No wallets found in localStorage or database');
+      // If no wallets found in database or query failed, try localStorage
+      try {
+        let localWallets = [];
+        const normalizedAddress = address.toLowerCase();
+        const walletKey = `smart_wallet_${normalizedAddress}`;
+        const storedWallet = localStorage.getItem(walletKey);
+
+        if (storedWallet) {
+          try {
+            const walletData = JSON.parse(storedWallet);
+            console.log('Found wallet in localStorage:', walletData.address);
+            localWallets.push(walletData);
+            
+            // Since we found a wallet in localStorage but not in DB,
+            // try to save it to the database for future use
+            try {
+              console.log('Migrating localStorage wallet to database');
+              const { error: migrationError } = await supabase
+                .from('smart_wallets')
+                .insert([
+                  {
+                    address: walletData.address,
+                    owner_address: normalizedAddress,
+                    network_id: walletData.network_id || 'base-sepolia',
+                    metadata: walletData.metadata || { migrated_from_local: true },
+                    created_at: walletData.created_at || new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  }
+                ]);
+
+              if (migrationError) {
+                console.warn('Failed to migrate wallet to database:', migrationError);
+              } else {
+                console.log('Successfully migrated wallet from localStorage to database');
+              }
+            } catch (migrationError) {
+              console.warn('Error during wallet migration:', migrationError);
+            }
+          } catch (parseError) {
+            console.warn('Error parsing wallet from localStorage:', parseError);
+          }
+        }
+
+        if (localWallets.length > 0) {
+          console.log('Using wallets from localStorage');
+          setMappedWallets(localWallets);
+        } else {
+          console.log('No wallets found in localStorage either');
+          setMappedWallets([]);
+        }
+      } catch (storageError) {
+        console.warn('Error accessing localStorage:', storageError);
         setMappedWallets([]);
       }
     } catch (err) {
       console.error('Error loading mapped smart wallets:', err)
       setError('Failed to load smart wallets')
+      setMappedWallets([])
     } finally {
       setIsLoading(false)
     }
@@ -197,20 +220,150 @@ export function useSmartWalletMapping() {
       // If wallet already exists, consider it a success
       if (existingWallet && existingWallet.length > 0) {
         console.log('Smart wallet already mapped:', normalizedWalletAddress);
+        
+        // Update the user's smart wallet address in the database
+        try {
+          console.log('Updating user record with smart wallet address via API');
+          
+          const response = await fetch('/api/users/update-smart-wallet', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              walletAddress: normalizedOwnerAddress,
+              smartWalletAddress: normalizedWalletAddress
+            })
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.warn('Error updating user with smart wallet address via API:', errorText);
+          } else {
+            console.log('User smart wallet address updated successfully via API');
+          }
+        } catch (updateError) {
+          console.warn('Error calling update-smart-wallet API:', updateError);
+        }
+        
         return true;
       }
 
-      // Try to insert the wallet via an API endpoint
+      // Try to insert the wallet in the database
       try {
-        console.log('Attempting to store smart wallet data');
+        console.log('Attempting to store smart wallet data in database');
 
-        // Only store in localStorage if explicitly requested or as fallback
-        const useLocalStorage = typeof window !== 'undefined' &&
-          (window.location.search.includes('useLocalStorage=true') || window.location.search.includes('useMockWallet=true'));
+        // Store the wallet in the smart_wallets table
+        const { data: walletData, error: walletError } = await supabase
+          .from('smart_wallets')
+          .insert([
+            {
+              address: normalizedWalletAddress,
+              owner_address: normalizedOwnerAddress,
+              network_id: smartWalletData.networkId || 'base-sepolia',
+              metadata: {
+                created_by: 'LucraAI',
+                ...smartWalletData.metadata
+              },
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+          ]);
 
+        if (walletError) {
+          console.warn('Error storing smart wallet in database:', walletError);
+          
+          // Only use localStorage as a fallback if database insert fails
+          const useLocalStorage = typeof window !== 'undefined';
+          if (useLocalStorage) {
+            try {
+              console.log('Storing smart wallet data in localStorage (fallback)');
+              const walletKey = `smart_wallet_${normalizedOwnerAddress}`;
+              const walletData = {
+                address: normalizedWalletAddress,
+                owner_address: normalizedOwnerAddress,
+                network_id: smartWalletData.networkId || 'base-sepolia',
+                metadata: {
+                  privateKey: smartWalletData.privateKey,
+                  publicKey: smartWalletData.publicKey,
+                  ...smartWalletData.metadata
+                },
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+
+              localStorage.setItem(walletKey, JSON.stringify(walletData));
+              console.log('Smart wallet data stored in localStorage as fallback');
+              
+              // Still try to update the user's smart wallet address in the database
+              try {
+                console.log('Updating user record with smart wallet address via API');
+                
+                const response = await fetch('/api/users/update-smart-wallet', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    walletAddress: normalizedOwnerAddress,
+                    smartWalletAddress: normalizedWalletAddress
+                  })
+                });
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  console.warn('Error updating user with smart wallet address via API:', errorText);
+                } else {
+                  console.log('User smart wallet address updated successfully via API');
+                }
+              } catch (updateError) {
+                console.warn('Error calling update-smart-wallet API:', updateError);
+              }
+            } catch (storageError) {
+              console.warn('Failed to store wallet in localStorage:', storageError);
+              return false;
+            }
+          }
+        } else {
+          console.log('Smart wallet successfully stored in database');
+          
+          // Update the user's smart_wallet_address field
+          try {
+            console.log('Updating user record with smart wallet address via API');
+            
+            const response = await fetch('/api/users/update-smart-wallet', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                walletAddress: normalizedOwnerAddress,
+                smartWalletAddress: normalizedWalletAddress
+              })
+            });
+            
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.warn('Error updating user with smart wallet address via API:', errorText);
+            } else {
+              console.log('User smart wallet address updated successfully via API');
+            }
+          } catch (updateError) {
+            console.warn('Error calling update-smart-wallet API:', updateError);
+          }
+          
+          // Refresh mapped wallets
+          await loadMappedWallets();
+          return true;
+        }
+      } catch (dbError) {
+        console.warn('Database error when storing smart wallet:', dbError);
+        
+        // Try localStorage as fallback
+        const useLocalStorage = typeof window !== 'undefined';
         if (useLocalStorage) {
           try {
-            console.log('Storing smart wallet data in localStorage (as requested or fallback)');
+            console.log('Storing smart wallet data in localStorage (fallback after DB error)');
             const walletKey = `smart_wallet_${normalizedOwnerAddress}`;
             const walletData = {
               address: normalizedWalletAddress,
@@ -227,78 +380,15 @@ export function useSmartWalletMapping() {
 
             localStorage.setItem(walletKey, JSON.stringify(walletData));
             console.log('Smart wallet data stored in localStorage');
+            
+            // Refresh the mapped wallets
+            await loadMappedWallets();
+            return true;
           } catch (storageError) {
             console.warn('Failed to store wallet in localStorage:', storageError);
+            return false;
           }
         }
-
-        // Try to store in database as well
-        try {
-          // Create an API endpoint for this in the future
-          // For now, just log that we would store it
-          console.log('Would store smart wallet in database:', {
-            address: normalizedWalletAddress,
-            owner_address: normalizedOwnerAddress,
-            network_id: smartWalletData.networkId || 'base-sepolia'
-          });
-
-          // Mock successful database operation
-          console.log('Smart wallet stored successfully (mock)');
-        } catch (apiError) {
-          console.warn('Failed to store wallet via API:', apiError);
-        }
-      } catch (dbError) {
-        console.error('Database operation failed:', dbError);
-        // Don't throw here, we'll still try to update the user record
-      }
-
-      // Update the user record with the smart wallet address
-      try {
-        console.log('Updating user record with smart wallet address');
-
-        // Only store in localStorage if explicitly requested or as fallback
-        const useLocalStorage = typeof window !== 'undefined' &&
-          (window.location.search.includes('useLocalStorage=true') || window.location.search.includes('useMockWallet=true'));
-
-        if (useLocalStorage) {
-          try {
-            console.log('Storing wallet mapping in localStorage (as requested or fallback)');
-            const mappingKey = `wallet_mapping_${address.toLowerCase()}`;
-            const mappingData = {
-              wallet_address: address.toLowerCase(),
-              smart_wallet_address: smartWalletData.address,
-              updated_at: new Date().toISOString()
-            };
-
-            localStorage.setItem(mappingKey, JSON.stringify(mappingData));
-            console.log('Wallet mapping stored in localStorage');
-          } catch (storageError) {
-            console.warn('Failed to store mapping in localStorage:', storageError);
-          }
-        }
-
-        // Try to update in database as well
-        try {
-          const { error: userError } = await supabase
-            .from('users')
-            .update({
-              smart_wallet_address: smartWalletData.address,
-              updated_at: new Date().toISOString()
-            })
-            .eq('wallet_address', address.toLowerCase());
-
-          if (userError) {
-            console.warn('Error updating user with smart wallet:', userError.message);
-            // Don't throw here, as the smart wallet was stored successfully
-          } else {
-            console.log('User record updated successfully');
-          }
-        } catch (dbError) {
-          console.warn('Failed to update user record in database:', dbError);
-        }
-      } catch (userUpdateError) {
-        console.warn('Failed to update user record:', userUpdateError);
-        // Continue anyway since the wallet mapping is the important part
       }
 
       // Reload the mapped wallets
@@ -344,26 +434,8 @@ export function useSmartWalletMapping() {
         return mappedWallets[0]
       }
 
-      // Only use mock wallet if explicitly requested via query parameter
-      if (typeof window !== 'undefined' && window.location.search.includes('useMockWallet=true')) {
-        console.log('Creating mock wallet as requested via URL parameter')
-        const mockWallet = {
-          address: `0x${address.substring(2, 10)}000000000000000000000000000000`,
-          networkId: 'base-sepolia',
-          privateKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          publicKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          metadata: { isMock: true }
-        };
-
-        // Try to map the mock wallet, but don't throw if it fails
-        try {
-          await mapSmartWallet(mockWallet);
-        } catch (mapError) {
-          console.warn('Failed to map mock wallet, but continuing anyway:', mapError);
-        }
-
-        return mockWallet;
-      }
+      // Always use real wallet creation
+      console.log('Creating new smart wallet via createWallet');
 
       // First ensure the user exists in the database
       try {
@@ -413,9 +485,11 @@ export function useSmartWalletMapping() {
           newWallet = {
             address: `0x${address.substring(2, 10)}000000000000000000000000000000`,
             networkId: 'base-sepolia',
+            network_id: 'base-sepolia', // Add network_id for UI compatibility
             privateKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
             publicKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
-            metadata: { isMock: true, fallback: true }
+            metadata: { isMock: true, fallback: true },
+            created_at: new Date().toISOString()
           }
         } else {
           throw new Error('Failed to create smart wallet and no fallback available')

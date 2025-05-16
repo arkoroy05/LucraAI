@@ -47,6 +47,13 @@ const ENS_REGISTRY_ABI = [
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'bytes32', name: 'node', type: 'bytes32' }],
+    name: 'name',
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
+    stateMutability: 'view',
+    type: 'function',
   }
 ];
 
@@ -63,6 +70,13 @@ const ENS_RESOLVER_ABI = [
     inputs: [{ internalType: 'bytes32', name: 'node', type: 'bytes32' }, { internalType: 'uint256', name: 'coinType', type: 'uint256' }],
     name: 'addr',
     outputs: [{ internalType: 'bytes', name: '', type: 'bytes' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'bytes32', name: 'node', type: 'bytes32' }],
+    name: 'name',
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
     stateMutability: 'view',
     type: 'function',
   }
@@ -196,17 +210,6 @@ export async function resolveBaseName(name, useTestnet = false) {
       name = `${name}.base`;
     }
 
-    // For demo purposes, return mock addresses for common test names
-    // This prevents unnecessary API calls that might result in 404 errors
-    if (name === 'alice.base') return '0x1234567890123456789012345678901234567890';
-    if (name === 'bob.base') return '0x2345678901234567890123456789012345678901';
-    if (name === 'charlie.base') return '0x3456789012345678901234567890123456789012';
-    if (name === 'vitalik.base') return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-
-    // Handle special cases for development
-    if (name === '12d8.base') return '0x12d8fece4b8722b97fafaa6a1791fc4b9324f7c7';
-    if (name === 'e877.base') return '0xe87758C6CCcf3806C9f1f0C8F99f6Dcae36E5449';
-
     // Select the appropriate client and registry address based on the network
     const client = useTestnet ? baseSepoliaClient : baseClient;
     const registryAddress = useTestnet ? VALIDATED_REGISTRY_SEPOLIA : VALIDATED_REGISTRY_MAINNET;
@@ -215,31 +218,14 @@ export async function resolveBaseName(name, useTestnet = false) {
     // Check if the registry address is valid before making the call
     if (!isValidAddress(registryAddress)) {
       console.warn(`Invalid registry address: ${registryAddress}`);
-      return generateDeterministicAddress(name);
+      return null;
     }
 
     try {
-      // Compute the namehash for the name
+      // Calculate the namehash for the name
       const nameNode = namehash(name);
-      console.log(`Namehash for ${name}: ${nameNode}`);
 
-      // First check if the name exists in the registry
-      const owner = await client.readContract({
-        address: registryAddress,
-        abi: ENS_REGISTRY_ABI,
-        functionName: 'owner',
-        args: [nameNode],
-      });
-
-      // If the owner is the zero address, the name doesn't exist
-      if (owner === '0x0000000000000000000000000000000000000000') {
-        console.warn(`Name ${name} not found in registry`);
-        return generateDeterministicAddress(name);
-      }
-
-      console.log(`Owner of ${name}: ${owner}`);
-
-      // Get the resolver for this name
+      // Try to get the resolver for this name
       const resolverAddr = await client.readContract({
         address: registryAddress,
         abi: ENS_REGISTRY_ABI,
@@ -247,90 +233,49 @@ export async function resolveBaseName(name, useTestnet = false) {
         args: [nameNode],
       });
 
-      console.log(`Resolver for ${name}: ${resolverAddr}`);
-
-      // If no resolver is set, use the default resolver
-      const resolverToUse =
-        resolverAddr === '0x0000000000000000000000000000000000000000'
-          ? resolverAddress
-          : resolverAddr;
+      // If no resolver is set, return null
+      if (resolverAddr === '0x0000000000000000000000000000000000000000') {
+        console.warn(`No resolver set for ${name}`);
+        return null;
+      }
 
       // Call the addr function on the resolver
       const address = await client.readContract({
-        address: resolverToUse,
+        address: resolverAddr,
         abi: ENS_RESOLVER_ABI,
         functionName: 'addr',
         args: [nameNode],
       });
 
+      // If no address is set, return null
       if (address === '0x0000000000000000000000000000000000000000') {
         console.warn(`No address set for ${name}`);
-        return generateDeterministicAddress(name);
+        return null;
       }
 
       return address;
-    } catch (readError) {
-      console.warn(`Contract read failed: ${readError.message}`);
-      return generateDeterministicAddress(name);
+    } catch (error) {
+      console.warn(`Error resolving Base Name ${name}:`, error);
+      return null;
     }
   } catch (error) {
     console.error('Error resolving Base Name:', error);
-    return generateDeterministicAddress(name);
+    return null;
   }
 }
 
 /**
- * Generate a deterministic address from a name (for fallback)
- * @param {string} name - The name to generate an address for
- * @returns {string} - A deterministic Ethereum address
- */
-function generateDeterministicAddress(name) {
-  // Generate a deterministic address as fallback
-  const nameHash = Array.from(name).reduce(
-    (hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0,
-    0
-  );
-  const fallbackAddress = `0x${Math.abs(nameHash).toString(16).padStart(40, '0')}`;
-  console.log(`Using deterministic address for ${name}: ${fallbackAddress}`);
-  return fallbackAddress;
-}
-
-/**
- * Looks up the Base Name for an Ethereum address
- * @param {string} address - Ethereum address to look up
- * @param {boolean} useTestnet - Whether to use the Sepolia testnet
- * @returns {Promise<string|null>} - Base Name or null if not found
+ * Looks up a Base Name for an Ethereum address
+ * @param {string} address - The Ethereum address to look up
+ * @param {boolean} useTestnet - Whether to use testnet or mainnet resolution
+ * @returns {Promise<string|null>} - The Base Name or null if not found
  */
 export async function lookupBaseName(address, useTestnet = false) {
   try {
-    // Check if the input is a valid Ethereum address
+    // Check if the address is valid
     if (!isAddress(address)) {
       console.warn(`Invalid address format provided to lookupBaseName: ${address}`);
       return null;
-    }
-
-    // For demo purposes, return mock names for common test addresses
-    if (address === '0x1234567890123456789012345678901234567890') return 'alice.base';
-    if (address === '0x2345678901234567890123456789012345678901') return 'bob.base';
-    if (address === '0x3456789012345678901234567890123456789012') return 'charlie.base';
-    if (address === '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045') return 'vitalik.base';
-
-    // For smart wallets and known addresses, generate a deterministic name
-    // This is just for development purposes
-    const lowerAddress = address.toLowerCase();
-    if (lowerAddress.startsWith('0x12d8') ||
-        lowerAddress.startsWith('0xe87') ||
-        lowerAddress.startsWith('0x788') ||
-        lowerAddress.startsWith('0x6ad') ||
-        lowerAddress.startsWith('0x7881') ||
-        lowerAddress.startsWith('0x7be7')) {
-      return generateDeterministicName(address);
-    }
-
-    // In development, always generate a deterministic name based on the address
-    // This prevents unnecessary contract calls that might fail
-    if (process.env.NODE_ENV !== 'production') {
-      return generateDeterministicName(address);
     }
 
     // Select the appropriate client and registry address based on the network
@@ -340,18 +285,10 @@ export async function lookupBaseName(address, useTestnet = false) {
       BASE_NAME_REVERSE_REGISTRAR_SEPOLIA :
       BASE_NAME_REVERSE_REGISTRAR_MAINNET;
 
-    // Check if the registry address is valid before making the call
-    if (!isValidAddress(registryAddress)) {
-      console.warn(`Invalid registry address: ${registryAddress}`);
-      return generateDeterministicName(address);
-    }
-
     try {
       // Construct the reverse lookup name: address.addr.reverse
       const reverseName = `${address.toLowerCase().substring(2)}.addr.reverse`;
       const reverseNode = namehash(reverseName);
-
-      console.log(`Reverse node for ${address}: ${reverseNode}`);
 
       // Get the resolver for this reverse node
       const resolverAddr = await client.readContract({
@@ -361,36 +298,34 @@ export async function lookupBaseName(address, useTestnet = false) {
         args: [reverseNode],
       });
 
+      // If no resolver is set, return null
       if (resolverAddr === '0x0000000000000000000000000000000000000000') {
         console.warn(`No reverse resolver set for ${address}`);
-        return generateDeterministicName(address);
+        return null;
       }
 
-      console.log(`Resolver for ${address}: ${resolverAddr}`);
+      // Call the name function on the resolver
+      const name = await client.readContract({
+        address: resolverAddr,
+        abi: ENS_RESOLVER_ABI,
+        functionName: 'name',
+        args: [reverseNode],
+      });
 
-      // In a real implementation, we would call the name() function on the resolver
-      // For now, we'll generate a deterministic name
-      return generateDeterministicName(address);
-    } catch (contractError) {
-      console.warn(`Base Name lookup failed for ${address}:`, contractError);
-      return generateDeterministicName(address);
+      // If no name is set, return null
+      if (!name) {
+        return null;
+      }
+
+      return name;
+    } catch (error) {
+      console.warn(`Error looking up Base Name for ${address}:`, error);
+      return null;
     }
   } catch (error) {
     console.error('Error looking up Base Name:', error);
-    return generateDeterministicName(address);
+    return null;
   }
-}
-
-/**
- * Generate a deterministic name from an address (for fallback)
- * @param {string} address - The address to generate a name for
- * @returns {string} - A deterministic Base Name
- */
-function generateDeterministicName(address) {
-  const shortAddr = address.substring(2, 6).toLowerCase();
-  const deterministicName = `${shortAddr}.base`;
-  console.log(`Using deterministic name for ${address}: ${deterministicName}`);
-  return deterministicName;
 }
 
 /**

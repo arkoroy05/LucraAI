@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
 import { useTransactions } from '../hooks/useTransactions'
 import { useWalletBalance } from '../hooks/useWalletBalance'
@@ -16,8 +16,21 @@ import { formatAddressOrName } from '../utils/baseNameResolver'
  */
 export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
   const { address, isConnected } = useAccount()
-  const { sendPayment } = useTransactions()
-  const { nativeDisplayBalance, isNativeBalanceLoading } = useWalletBalance()
+  const { sendPayment, error: transactionError } = useTransactions()
+  
+  // Create separate hook instances for connected wallet and smart wallet balances
+  const { 
+    nativeDisplayBalance: ownerDisplayBalance, 
+    formattedNativeBalance: ownerBalance,
+    isNativeBalanceLoading: isOwnerBalanceLoading,
+    refreshBalances: refreshOwnerBalance
+  } = useWalletBalance(null, null) // For connected wallet balance
+  
+  const { 
+    nativeDisplayBalance: smartWalletDisplayBalance, 
+    isNativeBalanceLoading: isSmartWalletBalanceLoading,
+    refreshBalances: refreshSmartWalletBalance
+  } = useWalletBalance(null, smartWalletAddress) // For smart wallet balance
   
   const [amount, setAmount] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -29,6 +42,17 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
     // Only allow numbers and decimals
     const value = e.target.value.replace(/[^0-9.]/g, '')
     setAmount(value)
+  }
+  
+  // Handle max amount click
+  const handleMaxAmount = () => {
+    if (ownerBalance) {
+      // Set a slightly lower amount to account for gas
+      if (!isNaN(parseFloat(ownerBalance)) && parseFloat(ownerBalance) > 0) {
+        const maxAmount = Math.max(0, parseFloat(ownerBalance) - 0.01).toString()
+        setAmount(maxAmount)
+      }
+    }
   }
   
   // Handle funding the smart wallet
@@ -47,20 +71,32 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
       setIsSubmitting(true)
       setError(null)
       
+      console.log(`Sending ${amount} ETH to ${smartWalletAddress}`)
+      
       // Send payment to the smart wallet
       const result = await sendPayment({
         to: smartWalletAddress,
         amount: amount,
-        token: 'ETH'
+        token: 'ETH',
+        note: 'Fund smart wallet'
       })
+      
+      console.log('Fund transaction result:', result)
       
       if (result?.success) {
         setSuccess(true)
+        
+        // Refresh both balances to show updated values
+        setTimeout(() => {
+          refreshOwnerBalance()
+          refreshSmartWalletBalance()
+        }, 1000)
+        
         setTimeout(() => {
           if (onSuccess) onSuccess(result)
         }, 2000)
       } else {
-        throw new Error(result?.error || 'Failed to fund smart wallet')
+        throw new Error(result?.error || transactionError || 'Failed to fund smart wallet')
       }
     } catch (err) {
       console.error('Error funding smart wallet:', err)
@@ -74,6 +110,14 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
   const handleCancel = () => {
     if (onCancel) onCancel()
   }
+  
+  // Update error from transaction hook
+  useEffect(() => {
+    if (transactionError && isSubmitting) {
+      setError(transactionError)
+      setIsSubmitting(false)
+    }
+  }, [transactionError, isSubmitting])
   
   return (
     <div className="p-4 bg-white/5 rounded-xl border border-white/10">
@@ -96,9 +140,16 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
         </div>
         
         <div className="flex justify-between items-center">
-          <div className="text-sm text-white/60">Available</div>
+          <div className="text-sm text-white/60">Available (Your Wallet)</div>
           <div className="text-sm text-white">
-            {isNativeBalanceLoading ? 'Loading...' : nativeDisplayBalance || '0 ETH'}
+            {isOwnerBalanceLoading ? 'Loading...' : ownerDisplayBalance || '0 ETH'}
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center">
+          <div className="text-sm text-white/60">Smart Wallet Balance</div>
+          <div className="text-sm text-white">
+            {isSmartWalletBalanceLoading ? 'Loading...' : smartWalletDisplayBalance || '0 ETH'}
           </div>
         </div>
         
@@ -116,14 +167,13 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
               className="bg-white/5 border-white/10 text-white"
               disabled={isSubmitting || success}
             />
-            {amount && (
+            {!isSubmitting && !success && ownerBalance && parseFloat(ownerBalance) > 0 && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="absolute right-2 top-1/2 transform -translate-y-1/2 text-purple-400 hover:text-purple-300 p-1 h-6"
-                onClick={() => setAmount(nativeDisplayBalance?.split(' ')[0] || '')}
-                disabled={isSubmitting || success}
+                onClick={handleMaxAmount}
               >
                 MAX
               </Button>
@@ -159,7 +209,7 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
             <Button
               onClick={handleFundWallet}
               className="bg-purple-500 hover:bg-purple-600 text-white gap-1"
-              disabled={isSubmitting || !amount || success}
+              disabled={isSubmitting || !amount || success || !parseFloat(amount) || parseFloat(amount) <= 0}
             >
               {isSubmitting ? (
                 <span className="flex items-center">

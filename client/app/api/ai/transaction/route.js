@@ -56,7 +56,7 @@ export async function POST(req) {
         "isTransaction": true,
         "type": "send" or "split",
         "amount": the amount to send,
-        "token": the token to send (default to ETH),
+        "token": the token to send (ALWAYS default to ETH if not specified),
         "recipient": the recipient address or name (for send),
         "recipients": array of recipient addresses or names (for split)
       }

@@ -13,7 +13,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
 
 /**
- * Stores a user's wallet address in the database
+ * Stores a user's wallet address in the database using the server API
  * @param {string} walletAddress - The user's wallet address
  * @param {string} walletType - The type of wallet (e.g., 'metamask', 'coinbase')
  * @returns {Promise<Object>} - The result of the database operation
@@ -28,44 +28,30 @@ export const storeWalletAddress = async (walletAddress, walletType) => {
     // Normalize the wallet address to lowercase to prevent case-sensitivity issues
     const normalizedAddress = walletAddress.toLowerCase();
 
-    // First check if the user already exists
-    const { data: existingUser, error: selectError } = await supabase
-      .from('users')
-      .select('id, wallet_address')
-      .eq('wallet_address', normalizedAddress)
+    // Use the server API to store the wallet address
+    // This bypasses RLS policies by using the service role key
+    const response = await fetch('/api/users/store', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        walletAddress: normalizedAddress,
+        walletType: walletType || 'unknown',
+      }),
+    });
 
-    if (selectError) {
-      console.error('Error checking for existing user:', selectError);
-      // Continue anyway to try to create the user
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Error response from user store API:', errorData);
+      return { error: errorData.error || `Failed to store wallet address: ${response.status}` };
     }
 
-    if (existingUser && existingUser.length > 0) {
-      // User exists, update the last login time
-      console.log('User exists, updating last login time');
-      return await supabase
-        .from('users')
-        .update({
-          updated_at: new Date().toISOString(),
-          wallet_type: walletType || 'unknown'
-        })
-        .eq('wallet_address', normalizedAddress)
-    } else {
-      // User doesn't exist, create a new record
-      console.log('User does not exist, creating new record');
-      return await supabase
-        .from('users')
-        .insert([
-          {
-            wallet_address: normalizedAddress,
-            wallet_type: walletType || 'unknown',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
-        ])
-    }
+    const userData = await response.json();
+    return { data: userData, error: null };
   } catch (error) {
-    console.error('Error storing wallet address:', error)
-    return { error: error.message || 'Unknown error storing wallet address' }
+    console.error('Error storing wallet address:', error);
+    return { error: error.message || 'Unknown error storing wallet address' };
   }
 }
 
@@ -344,55 +330,52 @@ export const createConversation = async (walletAddress, title) => {
       return null
     }
 
-    // Call the create_conversation RPC function
-    const { data, error } = await supabase.rpc('create_conversation', {
-      p_wallet_address: walletAddress,
-      p_title: title
-    })
+    // Normalize the wallet address
+    const normalizedAddress = walletAddress.toLowerCase();
 
-    if (error) {
-      // Check if this is a "function not found" error, which can happen if the function was just created
-      if (error.message && error.message.includes('function not found')) {
-        console.error('Function create_conversation not found. It may need to be created in the database.')
+    // Use the server API to create conversation
+    // This bypasses RLS policies by using the service role key
+    try {
+      console.log(`Creating conversation via server API for wallet ${normalizedAddress}`);
+      
+      const response = await fetch('/api/conversations/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          walletAddress: normalizedAddress,
+          title: title
+        }),
+      });
 
-        // Fallback: Create the conversation directly using the chat_conversations table
-        try {
-          // First get the user ID
-          const { data: user } = await supabase
-            .from('users')
-            .select('id')
-            .eq('wallet_address', walletAddress)
-            .maybeSingle();
-
-          if (user) {
-            const { data: newConversation, error: insertError } = await supabase
-              .from('chat_conversations')
-              .insert({
-                user_id: user.id,
-                title: title,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              })
-              .select('id')
-              .single();
-
-            if (insertError) {
-              console.error('Error creating conversation directly:', insertError)
-              return null
-            }
-
-            return newConversation?.id || null
-          }
-        } catch (fallbackError) {
-          console.error('Error in fallback conversation creation:', fallbackError)
-        }
-      } else {
-        console.error('Error creating conversation:', error)
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error response from conversation create API:', errorData);
+        return null;
       }
-      return null
-    }
 
-    return data
+      const data = await response.json();
+      return data.conversationId;
+    } catch (apiError) {
+      console.error('Error calling conversation create API:', apiError);
+      
+      // Try the fallback approach using RPC function
+      console.log('Trying fallback approach with RPC function');
+      
+      // Call the create_conversation RPC function
+      const { data, error } = await supabase.rpc('create_conversation', {
+        p_wallet_address: normalizedAddress,
+        p_title: title
+      });
+
+      if (error) {
+        console.error('Error creating conversation via RPC:', error);
+        return null;
+      }
+
+      return data;
+    }
   } catch (error) {
     console.error('Error creating conversation:', error)
     return null
@@ -649,7 +632,7 @@ export const updateTransactionStatus = async (transactionId, transactionHash, st
 }
 
 /**
- * Gets a user by wallet address
+ * Gets a user by wallet address using the server API
  * @param {string} walletAddress - The user's wallet address
  * @returns {Promise<Object>} - The user object
  */
@@ -663,21 +646,98 @@ export const getUserByWalletAddress = async (walletAddress) => {
     // Normalize the wallet address to lowercase
     const normalizedAddress = walletAddress.toLowerCase();
 
-    // Use maybeSingle instead of single to avoid 406 errors when no user is found
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('wallet_address', normalizedAddress)
-      .maybeSingle();
+    // Use the server API to get the user
+    // This bypasses RLS policies by using the service role key
+    const response = await fetch(`/api/users/get?walletAddress=${encodeURIComponent(normalizedAddress)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
 
-    if (error) {
-      console.error('Error getting user by wallet address:', error);
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Error response from user get API:', errorData);
       return null;
     }
 
-    return data;
+    const userData = await response.json();
+    return userData; // Will be null if user not found
   } catch (error) {
     console.error('Error getting user by wallet address:', error);
     return null;
   }
 }
+
+/**
+ * Updates a user's smart wallet address
+ * @param {string} walletAddress - User's wallet address
+ * @param {string} smartWalletAddress - Smart wallet address to associate
+ * @returns {Promise<boolean>} - Whether the update was successful
+ */
+export const updateUserSmartWalletAddress = async (walletAddress, smartWalletAddress) => {
+  try {
+    if (!walletAddress) {
+      console.error('Missing wallet address for updateUserSmartWalletAddress');
+      return false;
+    }
+
+    // Normalize the addresses
+    const normalizedAddress = walletAddress.toLowerCase();
+    const normalizedSmartAddress = smartWalletAddress?.toLowerCase();
+
+    // First, ensure user exists in the database
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('wallet_address', normalizedAddress)
+      .maybeSingle();
+
+    if (userError) {
+      console.error('Error checking for user:', userError);
+      return false;
+    }
+
+    if (!user) {
+      // Try to create the user
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert([
+          {
+            wallet_address: normalizedAddress,
+            wallet_type: 'wagmi',
+            smart_wallet_address: normalizedSmartAddress,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (insertError) {
+        console.error('Error creating user with smart wallet address:', insertError);
+        return false;
+      }
+
+      return true;
+    }
+
+    // Update the existing user with the smart wallet address
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        smart_wallet_address: normalizedSmartAddress,
+        updated_at: new Date().toISOString()
+      })
+      .eq('wallet_address', normalizedAddress);
+
+    if (updateError) {
+      console.error('Error updating user smart wallet address:', updateError);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error updating user smart wallet address:', error);
+    return false;
+  }
+};

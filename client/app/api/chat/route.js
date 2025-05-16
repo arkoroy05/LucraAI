@@ -25,7 +25,7 @@ async function parseUserMessage(message) {
       const lowerText = text.toLowerCase();
       let intent = 'unknown';
       let amount = null;
-      let token = 'USDC';
+      let token = 'ETH';
       let recipients = [];
       let splitType = null;
       let note = null;
@@ -107,7 +107,7 @@ async function parseUserMessage(message) {
       For action-related intents, extract the following information:
       1. Intent (send, split, check_balance, transaction_history, chat_history, history, etc.)
       2. Amount (if applicable)
-      3. Currency/Token (default to USDC if not specified)
+      3. Currency/Token (default to ETH if not specified - ALWAYS use ETH as the default token)
       4. Recipients (extract names/addresses with @ symbol if present)
       5. Split type (equal, percentage, custom amounts)
       6. Reason/note for the transaction (if provided)
@@ -125,7 +125,7 @@ async function parseUserMessage(message) {
       {
         "intent": string,
         "amount": number or null,
-        "token": string,
+        "token": string (default to "ETH"),
         "recipients": array of strings,
         "split_type": string or null,
         "note": string or null,
@@ -142,9 +142,9 @@ async function parseUserMessage(message) {
       }
 
       Examples of action intents:
-      - "Send 50 USDC to @alice.base" → {"intent": "send", "amount": 50, "token": "USDC", "recipients": ["alice.base"], "split_type": null, "note": null, "isConversational": false}
-      - "Split 100 equally between @bob and @charlie for dinner" → {"intent": "split", "amount": 100, "token": "USDC", "recipients": ["bob", "charlie"], "split_type": "equal", "note": "for dinner", "isConversational": false}
-      - "Check my balance" → {"intent": "check_balance", "amount": null, "token": null, "recipients": [], "split_type": null, "note": null, "isConversational": false}
+      - "Send 50 ETH to @alice.base" → {"intent": "send", "amount": 50, "token": "ETH", "recipients": ["alice.base"], "split_type": null, "note": null, "isConversational": false}
+      - "Split 100 equally between @bob and @charlie for dinner" → {"intent": "split", "amount": 100, "token": "ETH", "recipients": ["bob", "charlie"], "split_type": "equal", "note": "for dinner", "isConversational": false}
+      - "Check my balance" → {"intent": "check_balance", "amount": null, "token": "ETH", "recipients": [], "split_type": null, "note": null, "isConversational": false}
       - "Show my transaction history" → {"intent": "transaction_history", "history_type": "transactions", "limit": 10, "isConversational": false}
 
       Examples of conversational queries:
@@ -210,7 +210,7 @@ Extracted JSON:`;
           // For action intents, ensure all fields exist
           parsedData.isConversational = false;
           parsedData.amount = parsedData.amount || null;
-          parsedData.token = parsedData.token || 'USDC';
+          parsedData.token = parsedData.token || 'ETH';
           parsedData.recipients = parsedData.recipients || [];
           parsedData.split_type = parsedData.split_type || null;
           parsedData.note = parsedData.note || null;
@@ -242,7 +242,7 @@ Extracted JSON:`;
     return {
       intent: 'unknown',
       amount: null,
-      token: 'USDC',
+      token: 'ETH',
       recipients: [],
       split_type: null,
       note: null,
@@ -350,7 +350,7 @@ async function generateAIResponse(parsedData, walletAddress) {
         ? recipients.map(r => `@${r}`).join(' and ')
         : 'the recipient';
 
-      return `🤖 I've prepared a transaction to send ${amount} ${token} to ${recipientText}${note ? ` ${note}` : ''}. Would you like to confirm this transaction?`;
+      return `🤖 I've prepared a transaction to send ${amount} ${token || 'ETH'} to ${recipientText}${note ? ` ${note}` : ''}. Would you like to confirm this transaction?`;
 
     case 'split':
       const splitRecipients = recipients && recipients.length > 0
@@ -358,7 +358,7 @@ async function generateAIResponse(parsedData, walletAddress) {
         : 'the recipients';
       const splitTypeText = split_type === 'equal' ? 'equally' : 'as specified';
 
-      return `🤖 I'll split ${amount} ${token} ${splitTypeText} between ${splitRecipients}${note ? ` ${note}` : ''}. Is this correct?`;
+      return `🤖 I'll split ${amount} ${token || 'ETH'} ${splitTypeText} between ${splitRecipients}${note ? ` ${note}` : ''}. Is this correct?`;
 
     case 'check_balance':
       // We'll fetch the actual balance from the client side
@@ -368,7 +368,7 @@ async function generateAIResponse(parsedData, walletAddress) {
           // Check if the user exists in the database
           const { data: user, error: userError } = await supabaseServer
             .from('users')
-            .select('id')
+            .select('id, smart_wallet_address')
             .eq('wallet_address', walletAddress)
             .maybeSingle();
 
@@ -376,21 +376,28 @@ async function generateAIResponse(parsedData, walletAddress) {
             console.error('Error checking user:', userError);
           }
 
-          // If user doesn't exist, create them
-          if (!user && !userError) {
-            const { error: createError } = await supabaseServer
-              .from('users')
-              .insert([
-                {
-                  wallet_address: walletAddress,
-                  wallet_type: 'wagmi',
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                }
-              ]);
+          if (!user) {
+            console.log(`User not found in database: ${walletAddress}`);
+          } else {
+            try {
+              // Log this balance check to chat history
+              const { error: historyError } = await supabaseServer
+                .from('chat_history')
+                .insert([
+                  {
+                    user_id: user.id,
+                    message: 'Balance check request',
+                    is_user: false,
+                    created_at: new Date().toISOString(),
+                    metadata: { action: 'check_balance', token: 'ETH' }
+                  }
+                ]);
 
-            if (createError) {
-              console.error('Error creating user:', createError);
+              if (historyError) {
+                console.error('Error logging balance check to history:', historyError);
+              }
+            } catch (historyError) {
+              console.error('Error handling chat history:', historyError);
             }
           }
         } catch (error) {
@@ -433,7 +440,7 @@ async function generateAIResponse(parsedData, walletAddress) {
               if (tx.amount) totalAmount += parseFloat(tx.amount);
             });
 
-            return `🤖 Here's your recent transaction history. You've made ${data.length} transactions, with the most recent on ${recentDate.toLocaleDateString()}, totaling approximately ${totalAmount.toFixed(2)} ${data[0].token || 'USDC'}.`;
+            return `🤖 Here's your recent transaction history. You've made ${data.length} transactions, with the most recent on ${recentDate.toLocaleDateString()}, totaling approximately ${totalAmount.toFixed(2)} ${data[0].token || 'ETH'}.`;
           } else if (historyType === 'chat') {
             if (!data || data.length === 0) {
               return `🤖 You don't have any chat history yet. As we converse, your chat history will be saved here.`;
@@ -561,7 +568,7 @@ export async function POST(req) {
                     transaction_hash: null, // Will be updated when the transaction is executed
                     transaction_type: parsedData.intent,
                     amount: parsedData.amount || 0,
-                    token: parsedData.token || 'USDC',
+                    token: parsedData.token || 'ETH',
                     recipient_address: parsedData.recipients && parsedData.recipients.length > 0
                       ? parsedData.recipients[0]
                       : 'unknown',

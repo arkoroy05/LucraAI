@@ -60,7 +60,7 @@ export function getTokenSymbol(tokenAddress) {
     // Add more tokens as needed
   }
   
-  return tokens[tokenAddress] || 'Unknown'
+  return tokens[tokenAddress] || 'ETH'
 }
 
 /**

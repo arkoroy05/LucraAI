@@ -18,10 +18,11 @@ import {
  * Provides methods to send transactions and track their status
  */
 export function useTransactions() {
-  const { data: hash, isPending, sendTransaction } = useSendTransaction()
+  const { data: hash, isPending, sendTransaction, error: sendError } = useSendTransaction()
   const { address } = useAccount()
   const chainId = useChainId()
   const [lastTransaction, setLastTransaction] = useState(null)
+  const [transactionError, setTransactionError] = useState(null)
 
   const {
     isLoading: isConfirming,
@@ -65,15 +66,49 @@ export function useTransactions() {
     storeConfirmedTransaction()
   }, [hash, isConfirmed, receipt, address, lastTransaction, network])
 
+  // Reset error when a new transaction is sent
+  useEffect(() => {
+    if (hash) {
+      setTransactionError(null)
+    }
+  }, [hash])
+
+  // Track send errors
+  useEffect(() => {
+    if (sendError) {
+      setTransactionError(sendError.message)
+    }
+  }, [sendError])
+
   /**
    * Send a transaction to a recipient
-   * @param {string} to - Recipient address or Base Name
-   * @param {string} amount - Amount in ETH
-   * @param {string} token - Token symbol (currently only supports native ETH)
-   * @param {string} note - Optional note for the transaction
+   * @param {Object} params - Transaction parameters
+   * @param {string} params.to - Recipient address or Base Name
+   * @param {string|number} params.amount - Amount in ETH
+   * @param {string} params.token - Token symbol (currently only supports native ETH)
+   * @param {string} params.note - Optional note for the transaction
+   * @returns {Promise<Object>} - Result object with success flag and hash or error
    */
-  const sendPayment = useCallback(async (to, amount, token = 'ETH', note = '') => {
+  const sendPayment = useCallback(async (params) => {
     try {
+      setTransactionError(null)
+      
+      // Handle both object and individual parameters
+      const to = params.to || params;
+      const amount = params.amount || arguments[1];
+      const token = params.token || arguments[2] || 'ETH';
+      const note = params.note || arguments[3] || '';
+      
+      if (!to) {
+        throw new Error('Recipient address is required')
+      }
+      
+      if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+        throw new Error('Valid amount is required')
+      }
+
+      console.log(`Sending payment: ${amount} ${token} to ${to}`);
+
       // Prepare the transaction
       const preparedTx = await prepareTransaction({
         to,
@@ -92,16 +127,33 @@ export function useTransactions() {
 
       // Currently only supporting ETH, but could be extended for other tokens
       if (token === 'ETH') {
-        sendTransaction({
+        const result = await sendTransaction({
           to: preparedTx.to,
           value: preparedTx.value,
         })
+        
+        return {
+          success: true,
+          hash: result?.hash,
+          to: preparedTx.to
+        }
       } else {
         // For other tokens, we would need to implement ERC20 token transfers
-        console.log(`Token ${token} not supported yet`)
+        const error = `Token ${token} not supported yet`;
+        console.log(error);
+        setTransactionError(error);
+        return {
+          success: false,
+          error
+        }
       }
     } catch (error) {
       console.error('Error sending payment:', error)
+      setTransactionError(error.message)
+      return {
+        success: false,
+        error: error.message
+      }
     }
   }, [sendTransaction, network.id])
 
@@ -127,11 +179,28 @@ export function useTransactions() {
 
       // For now, we'll just send individual transactions
       // In a production app, this could be optimized with a smart contract
-      resolvedRecipients.forEach(recipient => {
-        sendPayment(recipient, amountPerRecipient, token, note)
-      })
+      const results = [];
+      for (const recipient of resolvedRecipients) {
+        const result = await sendPayment({
+          to: recipient, 
+          amount: amountPerRecipient, 
+          token, 
+          note
+        });
+        results.push(result);
+      }
+      
+      return {
+        success: results.every(r => r.success),
+        results
+      }
     } catch (error) {
       console.error('Error splitting payment:', error)
+      setTransactionError(error.message)
+      return {
+        success: false,
+        error: error.message
+      }
     }
   }, [sendPayment])
 
@@ -158,6 +227,7 @@ export function useTransactions() {
     isConfirmed,
     receipt,
     getExplorerUrl,
-    network
+    network,
+    error: transactionError
   }
 }

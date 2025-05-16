@@ -3,8 +3,9 @@
  * This implementation uses the Base Name Service contracts for proper name resolution
  */
 
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, stringToHex, keccak256, concat } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
+import { BASE_MAINNET, BASE_SEPOLIA } from '../config/networks';
 
 // Official Base Name Service contract addresses from https://github.com/base/basenames
 const BASE_NAME_REGISTRY_MAINNET = '0xb94704422c2a1e396835a571837aa5ae53285a95';
@@ -61,6 +62,13 @@ const ENS_RESOLVER_ABI = [
     outputs: [{ internalType: 'bytes', name: '', type: 'bytes' }],
     stateMutability: 'view',
     type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'bytes32', name: 'node', type: 'bytes32' }],
+    name: 'name',
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
+    stateMutability: 'view',
+    type: 'function',
   }
 ];
 
@@ -74,16 +82,7 @@ const REVERSE_REGISTRAR_ABI = [
   }
 ];
 
-const BASE_MAINNET = {
-  id: 8453,
-  name: 'Base Mainnet',
-  rpcUrls: { default: 'https://mainnet.base.org' },
-};
-const BASE_SEPOLIA = {
-  id: 84532,
-  name: 'Base Sepolia',
-  rpcUrls: { default: 'https://sepolia.base.org' },
-};
+// Use network configuration imported above
 
 const baseClient = createPublicClient({
   chain: base,
@@ -98,32 +97,99 @@ function isAddress(value) {
   return typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-function generateDeterministicName(address) {
-  // Simple deterministic name for dev
-  return `${address.slice(2, 6)}.base`;
+/**
+ * Calculate the namehash of a name
+ * @param {string} name - The name to hash
+ * @returns {string} - The namehash as a hex string
+ */
+function namehash(name) {
+  if (!name) return '0x0000000000000000000000000000000000000000000000000000000000000000';
+
+  // Split the name into labels
+  const labels = name.split('.');
+
+  // Start with the empty namehash
+  let node = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
+  // Process each label from right to left
+  for (let i = labels.length - 1; i >= 0; i--) {
+    const labelHash = keccak256(stringToHex(labels[i]));
+    node = keccak256(concat([node, labelHash]));
+  }
+
+  return node;
 }
 
 /**
  * Resolves a Base Name to an Ethereum address
  * @param {string} name - The Base Name to resolve
- * @param {boolean} isTestnet - Whether to use testnet or mainnet resolution
+ * @param {boolean} useTestnet - Whether to use testnet or mainnet resolution
  * @returns {Promise<string|null>} - The resolved Ethereum address or null if not found
  */
 export async function resolveBaseName(name, useTestnet = false) {
   try {
+    // Handle null or undefined input
     if (!name) return null;
-    // For demo purposes, return mock addresses for common test names
-    if (name === 'alice.base') return '0x1234567890123456789012345678901234567890';
-    if (name === 'bob.base') return '0x2345678901234567890123456789012345678901';
-    if (name === 'charlie.base') return '0x3456789012345678901234567890123456789012';
-    if (name === 'vitalik.base') return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-    // For other names, generate a deterministic address for dev
-    if (process.env.NODE_ENV !== 'production') {
-      return `0x${name.replace(/[^a-z0-9]/gi, '').padEnd(40, '0').slice(0, 40)}`;
+
+    // If the input is already an Ethereum address, return it
+    if (isAddress(name)) return name;
+
+    // Ensure name is a string
+    name = String(name);
+
+    // Add .base suffix if not present
+    if (!name.endsWith('.base')) {
+      name = `${name}.base`;
     }
-    // In production, call the contract (not implemented here)
-    // TODO: Implement actual contract call for production
-    return null;
+
+    // Select the appropriate client and registry address based on the network
+    const client = useTestnet ? baseSepoliaClient : baseClient;
+    const registryAddress = useTestnet ? VALIDATED_REGISTRY_SEPOLIA : VALIDATED_REGISTRY_MAINNET;
+    const resolverAddress = useTestnet ? BASE_NAME_RESOLVER_SEPOLIA : BASE_NAME_RESOLVER_MAINNET;
+
+    // Check if the registry address is valid
+    if (!isValidAddress(registryAddress)) {
+      console.warn(`Invalid registry address: ${registryAddress}`);
+      return null;
+    }
+
+    try {
+      // Calculate the namehash for the name
+      const nameNode = namehash(name);
+
+      // Try to get the resolver for this name
+      const resolverAddr = await client.readContract({
+        address: registryAddress,
+        abi: ENS_REGISTRY_ABI,
+        functionName: 'resolver',
+        args: [nameNode],
+      });
+
+      // If no resolver is set, return null
+      if (resolverAddr === '0x0000000000000000000000000000000000000000') {
+        console.warn(`No resolver set for ${name}`);
+        return null;
+      }
+
+      // Call the addr function on the resolver
+      const address = await client.readContract({
+        address: resolverAddr,
+        abi: ENS_RESOLVER_ABI,
+        functionName: 'addr',
+        args: [nameNode],
+      });
+
+      // If no address is set, return null
+      if (address === '0x0000000000000000000000000000000000000000') {
+        console.warn(`No address set for ${name}`);
+        return null;
+      }
+
+      return address;
+    } catch (error) {
+      console.warn(`Error resolving Base Name ${name}:`, error);
+      return null;
+    }
   } catch (error) {
     console.error('Error resolving Base Name:', error);
     return null;
@@ -133,36 +199,90 @@ export async function resolveBaseName(name, useTestnet = false) {
 /**
  * Looks up a Base Name for an Ethereum address
  * @param {string} address - The Ethereum address to look up
- * @param {boolean} isTestnet - Whether to use testnet or mainnet resolution
+ * @param {boolean} useTestnet - Whether to use testnet or mainnet resolution
  * @returns {Promise<string|null>} - The Base Name or null if not found
  */
 export async function lookupBaseName(address, useTestnet = false) {
   try {
+    console.log(`lookupBaseName called for ${address} (testnet: ${useTestnet})`);
+    
+    // Check if the address is valid
     if (!isAddress(address)) {
       console.warn(`Invalid address format provided to lookupBaseName: ${address}`);
       return null;
     }
-    if (address === '0x1234567890123456789012345678901234567890') return 'alice.base';
-    if (address === '0x2345678901234567890123456789012345678901') return 'bob.base';
-    if (address === '0x3456789012345678901234567890123456789012') return 'charlie.base';
-    if (address === '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045') return 'vitalik.base';
-    const lowerAddress = address.toLowerCase();
-    if (
-      lowerAddress.startsWith('0x12d8') ||
-      lowerAddress.startsWith('0xe87') ||
-      lowerAddress.startsWith('0x788') ||
-      lowerAddress.startsWith('0x6ad') ||
-      lowerAddress.startsWith('0x7881') ||
-      lowerAddress.startsWith('0x7be7')
-    ) {
-      return generateDeterministicName(address);
+
+    // Normalize the address
+    address = address.toLowerCase();
+
+    // Select the appropriate client and registry address based on the network
+    const client = useTestnet ? baseSepoliaClient : baseClient;
+    const registryAddress = useTestnet ? VALIDATED_REGISTRY_SEPOLIA : VALIDATED_REGISTRY_MAINNET;
+    const reverseRegistrarAddress = useTestnet ?
+      BASE_NAME_REVERSE_REGISTRAR_SEPOLIA :
+      BASE_NAME_REVERSE_REGISTRAR_MAINNET;
+
+    if (!isValidAddress(registryAddress)) {
+      console.warn(`Invalid registry address for ${useTestnet ? 'testnet' : 'mainnet'}: ${registryAddress}`);
+      return null;
     }
-    if (process.env.NODE_ENV !== 'production') {
-      return generateDeterministicName(address);
+
+    try {
+      // Construct the reverse lookup name: address.addr.reverse
+      const reverseName = `${address.substring(2)}.addr.reverse`;
+      console.log(`Constructed reverse name: ${reverseName}`);
+      
+      const reverseNode = namehash(reverseName);
+      console.log(`Reverse namehash: ${reverseNode}`);
+
+      console.log(`Looking up resolver for reverse node at registry: ${registryAddress}`);
+
+      // Get the resolver for this reverse node
+      const resolverAddr = await client.readContract({
+        address: registryAddress,
+        abi: ENS_REGISTRY_ABI,
+        functionName: 'resolver',
+        args: [reverseNode],
+      });
+      console.log(`Found resolver address: ${resolverAddr}`);
+
+      // If no resolver is set, return null
+      if (!resolverAddr || resolverAddr === '0x0000000000000000000000000000000000000000') {
+        console.warn(`No reverse resolver set for ${address}`);
+        return null;
+      }
+
+      console.log(`Calling name() on resolver: ${resolverAddr}`);
+
+      // Call the name function on the resolver
+      const name = await client.readContract({
+        address: resolverAddr,
+        abi: ENS_RESOLVER_ABI,
+        functionName: 'name',
+        args: [reverseNode],
+      });
+      console.log(`Resolver returned name: ${name || 'null'}`);
+
+      // If no name is set or if it's not a valid .base name, return null
+      if (!name) {
+        console.log(`No name found for address ${address}`);
+        return null;
+      }
+      
+      if (!isBaseName(name)) {
+        console.log(`Found name ${name} is not a valid Base name for address ${address}`);
+        return null;
+      }
+
+      console.log(`Successfully resolved ${address} to ${name}`);
+      return name;
+    } catch (error) {
+      console.warn(`Error looking up Base Name for ${address}:`, error);
+      // Log more details about the error
+      if (error.message) console.warn(`Error message: ${error.message}`);
+      if (error.code) console.warn(`Error code: ${error.code}`);
+      return null;
     }
-    // In production, call the contract (not implemented here)
-    // TODO: Implement actual contract call for production
-    return null;
   } catch (error) {
     console.error('Error looking up Base Name:', error);
     return null;
@@ -187,11 +307,29 @@ export function isBaseName(name) {
  */
 export function formatAddressOrName(addressOrName, prefixLength = 6, suffixLength = 4) {
   if (!addressOrName) return '';
+  
+  // If it's a base name, return it as is
   if (isBaseName(addressOrName)) {
     return addressOrName;
   }
-  if (typeof addressOrName === 'string' && /^0x[a-fA-F0-9]{40}$/.test(addressOrName)) {
+  
+  // If it's an address, format it
+  if (isAddress(addressOrName)) {
     return `${addressOrName.slice(0, prefixLength)}...${addressOrName.slice(-suffixLength)}`;
   }
+  
+  // If it's neither a base name nor an address, return it as is
   return addressOrName;
+}
+
+/**
+ * Generate a deterministic address from a name (for fallback)
+ * This function is kept only for compatibility with existing code
+ * @param {string} name - The name to generate an address for
+ * @returns {string} - A deterministic Ethereum address
+ * @deprecated - Use resolveBaseName instead
+ */
+function generateDeterministicAddress(name) {
+  console.warn('generateDeterministicAddress is deprecated, use resolveBaseName instead');
+  return `0x${keccak256(stringToHex(name)).slice(2, 42)}`;
 }

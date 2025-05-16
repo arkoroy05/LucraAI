@@ -74,8 +74,14 @@ export default function ChatInterface() {
   const hasRefreshedRef = useRef(false);
 
   // Store wallet address in Supabase when connected
+  // Use a ref to track if we've already stored the wallet address
+  const hasStoredWalletRef = useRef(false);
+
   useEffect(() => {
-    if (isConnected && address) {
+    if (isConnected && address && !hasStoredWalletRef.current) {
+      // Mark as stored to prevent multiple calls
+      hasStoredWalletRef.current = true;
+
       // Store wallet address in Supabase
       storeWalletAddress(address, 'wagmi')
         .then(() => console.log('Wallet address stored in Supabase'))

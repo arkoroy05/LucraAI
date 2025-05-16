@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
+import { useAccount } from 'wagmi'
 import { useSmartWallet } from '../hooks/useSmartWallet'
 import { useSmartWalletMapping } from '../hooks/useSmartWalletMapping'
 import { useWalletBalance } from '../hooks/useWalletBalance'
@@ -12,10 +13,20 @@ import { formatAddressOrName } from '../utils/baseNameResolver'
 import { getExplorerUrl } from '../config/networks'
 import { FundSmartWallet } from './FundSmartWallet'
 
+// Known address to BaseName mappings for UI display
+const knownAddresses = {
+  // Add known addresses and their baseNames here (all lowercase)
+  // Format: 'address': 'name.base'
+  '0xe87758c6cccf3806c9f1f0c8f99f6dcae36e5449': 'demo.base',
+  '0xb9b9b9bf673a9813bf04a92ebc1661cc25bc00f6': 'smartwallet.base',
+}
+
 /**
  * SmartWalletUI component that provides UI for creating and managing Smart Wallets
  */
 export function SmartWalletUI() {
+  const { address } = useAccount()
+
   const {
     smartWallet,
     isLoading: isSmartWalletLoading,
@@ -32,21 +43,24 @@ export function SmartWalletUI() {
     loadMappedWallets
   } = useSmartWalletMapping()
 
+  const [selectedWallet, setSelectedWallet] = useState(null)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isFunding, setIsFunding] = useState(false)
+  const [showFundingUI, setShowFundingUI] = useState(false)
+  const [walletBaseName, setWalletBaseName] = useState(null)
+
+  // Pass the selected smart wallet address to the wallet balance hook
   const {
     agentBalances,
     fetchAgentBalance,
     isAgentLoading
-  } = useWalletBalance()
+  } = useWalletBalance(null, selectedWallet?.address)
 
   const {
-    lookupAddress
+    lookupAddress,
+    baseName,
+    lookupSmartWalletName
   } = useBaseName()
-
-  const [isCreating, setIsCreating] = useState(false)
-  const [isFunding, setIsFunding] = useState(false)
-  const [selectedWallet, setSelectedWallet] = useState(null)
-  const [showFundingUI, setShowFundingUI] = useState(false)
-  const [walletBaseName, setWalletBaseName] = useState(null)
 
   // Set the selected wallet to the first mapped wallet if available
   useEffect(() => {
@@ -58,22 +72,35 @@ export function SmartWalletUI() {
   // Look up the Base Name for the selected wallet
   useEffect(() => {
     if (selectedWallet?.address) {
-      lookupAddress(selectedWallet.address)
-        .then(name => {
-          if (name) {
-            setWalletBaseName(name)
+      // First check if the connected wallet has a basename
+      lookupAddress(address)
+        .then(ownerBaseName => {
+          if (ownerBaseName) {
+            setWalletBaseName(ownerBaseName);
           } else {
-            setWalletBaseName(null)
+            // If the owner wallet doesn't have a basename, check if the smart wallet has one
+            lookupSmartWalletName(selectedWallet.address)
+              .then(smartWalletName => {
+                if (smartWalletName) {
+                  setWalletBaseName(smartWalletName);
+                } else {
+                  setWalletBaseName(null);
+                }
+              })
+              .catch(err => {
+                console.error('Error looking up Base Name for smart wallet:', err);
+                setWalletBaseName(null);
+              });
           }
         })
         .catch(err => {
-          console.error('Error looking up Base Name for smart wallet:', err)
-          setWalletBaseName(null)
-        })
+          console.error('Error looking up Base Name for owner wallet:', err);
+          setWalletBaseName(null);
+        });
     } else {
-      setWalletBaseName(null)
+      setWalletBaseName(null);
     }
-  }, [selectedWallet, lookupAddress])
+  }, [selectedWallet, lookupSmartWalletName, lookupAddress, address]);
 
   // Handle creating a new Smart Wallet
   const handleCreateWallet = async () => {
@@ -83,21 +110,25 @@ export function SmartWalletUI() {
 
       // First ensure the user exists in the database
       try {
-        const response = await fetch('/api/users/ensure', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            walletAddress: address,
-            walletType: 'wagmi'
-          })
-        });
-
-        if (!response.ok) {
-          console.warn('Failed to ensure user exists, but continuing anyway');
+        if (!address) {
+          console.warn('No wallet address available, skipping user record check');
         } else {
-          console.log('User record ensured in database');
+          const response = await fetch('/api/users/ensure', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              walletAddress: address,
+              walletType: 'wagmi'
+            })
+          });
+
+          if (!response.ok) {
+            console.warn('Failed to ensure user exists, but continuing anyway');
+          } else {
+            console.log('User record ensured in database');
+          }
         }
       } catch (userError) {
         console.warn('Error ensuring user exists, but continuing anyway:', userError);
@@ -231,7 +262,10 @@ export function SmartWalletUI() {
                       <span>{walletBaseName}</span>
                     </>
                   ) : (
-                    formatAddressOrName(selectedWallet.address)
+                    <>
+                      <span className="text-white/80">{formatAddressOrName(selectedWallet.address)}</span>
+                      <span className="text-xs text-white/40 ml-1">(No basename)</span>
+                    </>
                   )}
                 </span>
                 <div className="flex gap-2">
@@ -256,10 +290,14 @@ export function SmartWalletUI() {
                 </div>
               </div>
               <div className="text-xs text-white/60 mb-1">
-                Network: {selectedWallet.network_id.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                Network: {selectedWallet.network_id
+                  ? selectedWallet.network_id.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())
+                  : network?.name || 'Unknown'}
               </div>
               <div className="text-xs text-white/60 mb-3">
-                Created: {new Date(selectedWallet.created_at).toLocaleString()}
+                Created: {selectedWallet.created_at
+                  ? new Date(selectedWallet.created_at).toLocaleString()
+                  : 'Unknown'}
               </div>
 
               {/* Balance and fund button */}
@@ -292,7 +330,12 @@ export function SmartWalletUI() {
             <div className="mt-2">
               <h4 className="text-xs font-medium text-white/60 mb-2">Your Wallets</h4>
               <div className="space-y-1">
-                {mappedWallets.map((wallet) => (
+                {mappedWallets.map((wallet) => {
+                  // Check if there's a known BaseName for this wallet
+                  const knownBaseName = Object.entries(knownAddresses || {})
+                    .find(([addr]) => addr.toLowerCase() === wallet.address.toLowerCase())?.[1];
+
+                  return (
                   <div
                     key={wallet.address}
                     className={`p-2 rounded-md cursor-pointer flex justify-between items-center ${
@@ -302,14 +345,24 @@ export function SmartWalletUI() {
                     }`}
                     onClick={() => setSelectedWallet(wallet)}
                   >
-                    <span className="text-sm text-white">
-                      {formatAddressOrName(wallet.address)}
+                      <span className="text-sm text-white flex items-center gap-1">
+                        {knownBaseName ? (
+                          <>
+                            <Tag className="h-3 w-3 text-purple-400" />
+                            <span>{knownBaseName}</span>
+                          </>
+                        ) : (
+                          formatAddressOrName(wallet.address)
+                        )}
                     </span>
                     <span className="text-xs text-white/60">
-                      {wallet.network_id.includes('sepolia') ? 'Testnet' : 'Mainnet'}
+                        {wallet.network_id
+                          ? (wallet.network_id.includes('sepolia') ? 'Testnet' : 'Mainnet')
+                          : (network?.name?.toLowerCase().includes('sepolia') ? 'Testnet' : 'Mainnet')}
                     </span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

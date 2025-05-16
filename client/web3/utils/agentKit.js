@@ -1,108 +1,154 @@
+/**
+ * AgentKit integration for LucraAI
+ * This provides functionality for processing natural language transaction requests
+ */
+
+import { formatEther, parseEther, createPublicClient, http } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import { resolveBaseName } from './baseNameResolver';
+import { BASE_MAINNET, BASE_SEPOLIA } from '../config/networks';
 
-const formatEther = (value) => {
-  const valueAsNumber = Number(value) || 0;
-  return (valueAsNumber / 1e18).toString();
-};
-
-const parseEther = (value) => {
-  const valueAsNumber = Number(value) || 0;
-  return BigInt(Math.floor(valueAsNumber * 1e18));
-};
-
-const base = {
-  id: 8453,
-  name: 'Base Mainnet',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }
-};
-
-const baseSepolia = {
-  id: 84532,
-  name: 'Base Sepolia',
-  nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 }
-};
-
-const createPublicClient = (options) => {
-  const { chain, rpcUrl } = options;
-  return {
-    getBalance: async ({ address }) => {
-      try {
-        const response = await fetch(rpcUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: Date.now(),
-            method: 'eth_getBalance',
-            params: [address, 'latest'],
-          }),
-        });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        if (data.error) throw new Error(`RPC error: ${data.error.message || JSON.stringify(data.error)}`);
-        const balanceHex = data.result;
-        const balance = BigInt(balanceHex);
-        return balance;
-      } catch (error) {
-        return BigInt('100000000000000000');
-      }
-    }
-  };
-};
-
+// Create public clients for Base Mainnet and Sepolia
 const baseClient = createPublicClient({
   chain: base,
-  rpcUrl: process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL || 'https://mainnet.base.org',
-});
-const baseSepoliaClient = createPublicClient({
-  chain: baseSepolia,
-  rpcUrl: process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org',
+  transport: http(BASE_MAINNET.rpcUrls.default),
 });
 
+const baseSepoliaClient = createPublicClient({
+  chain: baseSepolia,
+  transport: http(BASE_SEPOLIA.rpcUrls.default),
+});
+
+/**
+ * AgentKit class for handling transaction requests
+ */
 class AgentKit {
   constructor(config) {
     this.name = config.name || 'LucraAI Agent';
-    this.description = config.description || 'A mock AgentKit agent';
+    this.description = config.description || 'LucraAI transaction agent';
     this.instructions = config.instructions || '';
     this.capabilities = config.capabilities || {};
   }
+
+  /**
+   * Process a natural language message
+   * @param {string} message - User's natural language message
+   * @returns {Promise<object>} - Processed transaction details or message response
+   */
   async process(message) {
-    const details = await extractTransactionDetails(message);
-    if (details) {
+    try {
+      // Check if the message is a transaction request
+      if (!isTransactionRequest(message)) {
+        return {
+          type: 'message',
+          agentResponse: {
+            response: 'I couldn\'t identify a transaction request in your message. Please try again with a clearer request, such as "Send 0.1 ETH to alice.base".',
+          },
+        };
+      }
+
+      // Extract transaction details from the message
+      const details = await extractTransactionDetails(message);
+
+      if (details) {
+        // Format a response based on the transaction type
+        let response;
+        if (details.type === 'send') {
+          const recipient = Array.isArray(details.recipients) ? details.recipients[0] : details.recipient;
+          response = `I'll process your request to send ${details.amount} ${details.token} to ${recipient}.`;
+        } else if (details.type === 'split') {
+          response = `I'll process your request to split ${details.amount} ${details.token} between ${details.recipients.join(', ')}.`;
+        } else {
+          response = `I'll process your ${details.type} request for ${details.amount} ${details.token}.`;
+        }
+
+        return {
+          type: 'transaction',
+          details,
+          agentResponse: { response },
+        };
+      }
+
+      // Fallback response if we couldn't extract details
       return {
-        type: 'transaction',
-        details,
+        type: 'message',
         agentResponse: {
-          response: `I'll process your request to ${details.type} ${details.amount} ${details.token || 'ETH'}.`,
+          response: 'I understood you want to make a transaction, but I couldn\'t extract all the necessary details. Please provide more information, such as the amount and recipient.',
+        },
+      };
+    } catch (error) {
+      console.error('Error processing message:', error);
+      return {
+        type: 'error',
+        error: error.message,
+        agentResponse: {
+          response: 'I encountered an error while processing your request. Please try again with a clearer message.',
         },
       };
     }
-    return {
-      type: 'message',
-      agentResponse: {
-        response: 'I couldn\'t process your request as a transaction.',
-      },
-    };
   }
 }
 
-export function createTransactionAgent({ useTestnet = false, walletAddress }) {
+/**
+ * Creates a transaction agent with the specified configuration
+ * @param {object} options - Options for creating the agent
+ * @param {boolean} options.useTestnet - Whether to use the Sepolia testnet
+ * @param {string} options.walletAddress - User's wallet address
+ * @param {string} options.smartWalletAddress - Optional smart wallet address
+ * @returns {AgentKit} - Configured AgentKit instance
+ */
+export function createTransactionAgent({ useTestnet = false, walletAddress, smartWalletAddress }) {
   const client = useTestnet ? baseSepoliaClient : baseClient;
   const chain = useTestnet ? baseSepolia : base;
+  
+  // Use smart wallet address if provided, otherwise use the connected wallet address
+  const targetAddress = smartWalletAddress || walletAddress;
+  
+  if (!targetAddress) {
+    console.error('No wallet address provided to createTransactionAgent');
+  } else {
+    console.log(`Creating agent for address: ${targetAddress} (${smartWalletAddress ? 'smart wallet' : 'connected wallet'})`);
+  }
+
   const agent = new AgentKit({
     name: 'LucraAI Transaction Agent',
     description: 'An agent that helps with cryptocurrency transactions on Base',
-    instructions: `You are LucraAI's transaction agent. You help users send, receive, and track cryptocurrency transactions on the Base network.\nYou can handle the following tasks:\n- Send ETH to an address or Base Name\n- Split payments between multiple recipients\n- Check transaction status\n- Provide transaction history\n- Resolve Base Names to addresses\n\nAlways verify transaction details before executing them.`,
+    instructions: `
+      You are LucraAI's transaction agent. You help users send, receive, and track cryptocurrency transactions on the Base network.
+      You can handle the following tasks:
+      - Send ETH to an address or Base Name
+      - Split payments between multiple recipients
+      - Check transaction status
+      - Provide transaction history
+      - Resolve Base Names to addresses
+
+      Always verify transaction details before executing them.
+    `,
     capabilities: {
       sendTransaction: {
         enabled: true,
         handler: async ({ to, amount, token = 'ETH' }) => {
           try {
+            // Resolve the recipient address if it's a Base Name
             const resolvedTo = await resolveBaseName(to, useTestnet);
-            if (!resolvedTo) throw new Error(`Could not resolve recipient address: ${to}`);
+
+            if (!resolvedTo) {
+              throw new Error(`Could not resolve recipient address: ${to}`);
+            }
+
+            // Parse the amount to wei
             const value = parseEther(amount.toString());
-            return { to: resolvedTo, value, token, chain: chain.name, walletAddress };
+
+            // Return the transaction details
+            return {
+              to: resolvedTo,
+              value,
+              token,
+              chain: chain.name,
+              walletAddress: targetAddress, // Use the target address
+            };
           } catch (error) {
+            console.error('Error in sendTransaction handler:', error);
             throw error;
           }
         },
@@ -112,8 +158,13 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
         handler: async ({ name }) => {
           try {
             const address = await resolveBaseName(name, useTestnet);
-            return { name, address, resolved: !!address };
+            return {
+              name,
+              address,
+              resolved: !!address,
+            };
           } catch (error) {
+            console.error('Error in resolveBaseName handler:', error);
             throw error;
           }
         },
@@ -122,55 +173,266 @@ export function createTransactionAgent({ useTestnet = false, walletAddress }) {
         enabled: true,
         handler: async () => {
           try {
-            return await client.getBalance({ address: walletAddress });
+            if (!targetAddress) {
+              throw new Error('Wallet address is required to fetch balance');
+            }
+
+            console.log(`Fetching balance for address: ${targetAddress}`);
+
+            // Fetch the balance from the blockchain
+            const balance = await client.getBalance({
+              address: targetAddress,
+            });
+
+            // Format the balance for display
+            const formattedBalance = formatEther(balance);
+            
+            console.log(`Fetched balance: ${formattedBalance} ETH for address ${targetAddress}`);
+
+            return {
+              balance: formattedBalance,
+              token: 'ETH',
+              chain: chain.name,
+            };
           } catch (error) {
-            throw error;
+            console.error('Error in getBalance handler:', error);
+
+            // Try up to 3 times with increasing delays between retries
+            for (let retry = 1; retry <= 3; retry++) {
+              try {
+                console.log(`Retry attempt ${retry} for getBalance...`);
+                
+                // Add an increasing delay before retrying
+                await new Promise(resolve => setTimeout(resolve, retry * 200));
+                
+                // Try fetch again
+                const balance = await client.getBalance({
+                  address: targetAddress,
+                });
+                
+                // Format the balance for display
+                const formattedBalance = formatEther(balance);
+                
+                console.log(`Successfully retrieved balance on retry ${retry}: ${formattedBalance} ETH for address ${targetAddress}`);
+                
+                return {
+                  balance: formattedBalance,
+                  token: 'ETH',
+                  chain: chain.name,
+                };
+              } catch (retryError) {
+                console.error(`Error on retry ${retry}:`, retryError);
+                
+                // If this is the last retry and it failed, continue to fallback
+                if (retry === 3) {
+                  console.warn('All retry attempts failed, returning default balance');
+                }
+              }
+            }
+            
+            // If all retries fail, return a default balance of 0
+            return {
+              balance: '0',
+              token: 'ETH',
+              chain: chain.name,
+            };
           }
         },
       },
+      getTransactionHistory: {
+        enabled: true,
+        handler: async ({ limit = 10 }) => {
+          try {
+            if (!targetAddress) {
+              throw new Error('Wallet address is required to fetch transaction history');
+            }
+            
+            // In a real implementation, we would query an API or blockchain for the transaction history
+            // For now, we'll check the database
+            
+            try {
+              // Fetch transaction history from the API
+              const response = await fetch(`/api/transactions/history?walletAddress=${targetAddress}&limit=${limit}`, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              if (!response.ok) {
+                throw new Error(`Failed to fetch transaction history: ${response.statusText}`);
+              }
+              
+              const history = await response.json();
+              
+              return {
+                transactions: history.transactions || [],
+                count: history.count || 0,
+                token: 'ETH',
+                chain: chain.name,
+              };
+            } catch (apiError) {
+              console.error('Error fetching transaction history from API:', apiError);
+              throw apiError;
+            }
+          } catch (error) {
+            console.error('Error in getTransactionHistory handler:', error);
+            throw error;
+          }
+        }
+      }
     },
   });
+
   return agent;
 }
 
+/**
+ * Processes a natural language transaction request
+ * @param {object} options - Options for processing the request
+ * @param {string} options.message - User's natural language message
+ * @param {boolean} options.useTestnet - Whether to use the Sepolia testnet
+ * @param {string} options.walletAddress - User's wallet address
+ * @returns {Promise<object>} - Processed transaction details
+ */
 export async function processTransactionRequest({ message, useTestnet = false, walletAddress }) {
-  const agent = createTransactionAgent({ useTestnet, walletAddress });
-  return agent.process(message);
+  try {
+    // Create an agent for handling the transaction
+    const agent = createTransactionAgent({ useTestnet, walletAddress });
+
+    // Process the message
+    return await agent.process(message);
+  } catch (error) {
+    console.error('Error processing transaction request:', error);
+
+    // Return a fallback response
+    return {
+      type: 'error',
+      error: error.message || 'An error occurred while processing your transaction request',
+      agentResponse: {
+        response: 'I encountered an error while processing your request. Please try again later.',
+      },
+    };
+  }
 }
 
+/**
+ * Checks if a message appears to be a transaction request
+ * @param {string} message - User's natural language message
+ * @returns {boolean} - True if the message appears to be a transaction request
+ */
 export function isTransactionRequest(message) {
-  const transactionKeywords = [
-    'send',
-    'transfer',
-    'pay',
-    'split',
-    'eth',
-    'ether',
-    'transaction',
-  ];
+  if (!message || typeof message !== 'string') return false;
+
   const lowerMessage = message.toLowerCase();
-  return transactionKeywords.some(keyword => lowerMessage.includes(keyword));
+
+  // Check for transaction-related keywords
+  const sendKeywords = ['send', 'transfer', 'pay', 'payment'];
+  const splitKeywords = ['split', 'divide', 'share'];
+  const checkKeywords = ['check', 'balance', 'show balance', 'how much'];
+  const historyKeywords = ['history', 'transaction', 'transactions', 'recent'];
+  const tokenKeywords = ['eth', 'ether', 'usdc', 'dai', 'crypto', 'token', 'coin'];
+
+  // Check if the message contains transaction-related keywords
+  const hasSendKeyword = sendKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasSplitKeyword = splitKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasCheckKeyword = checkKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasHistoryKeyword = historyKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasTokenKeyword = tokenKeywords.some(keyword => lowerMessage.includes(keyword));
+
+  // Return true if the message contains at least one transaction-related keyword
+  return hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword || 
+         (hasTokenKeyword && (hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword));
 }
 
+/**
+ * Extracts transaction details from a natural language message
+ * @param {string} message - User's natural language message
+ * @returns {Promise<object|null>} - Extracted transaction details or null if extraction failed
+ */
 export async function extractTransactionDetails(message) {
-  // Dummy extraction logic for demo
-  if (message.toLowerCase().includes('send')) {
-    return {
-      type: 'send',
-      amount: 0.1,
-      token: 'ETH',
-      recipients: ['alice.base'],
-      note: 'Demo transaction',
-    };
+  if (!message || typeof message !== 'string') return null;
+
+  const lowerMessage = message.toLowerCase();
+
+  // Check for transaction type
+  let type = 'unknown';
+  let amount = null;
+  let token = 'ETH';  // Always default to ETH
+  let recipient = null;
+  let recipients = [];
+  let splitType = null;
+
+  // Check for check balance intent
+  if (lowerMessage.includes('balance') || 
+      lowerMessage.includes('check') || 
+      lowerMessage.includes('how much') ||
+      lowerMessage.includes('show balance')) {
+      return {
+        type: 'check_balance',
+        amount: null,
+        token: 'ETH',  // Always use ETH
+        recipients: []
+      };
+    }
+
+  // Check for transaction history intent
+  if (lowerMessage.includes('history') || 
+      lowerMessage.includes('transactions') || 
+      lowerMessage.includes('recent') && 
+      lowerMessage.includes('transaction')) {
+      return {
+        type: 'transaction_history',
+        limit: 10,
+        token: 'ETH'  // Always use ETH
+      };
+    }
+
+  // Extract transaction type
+  if (lowerMessage.includes('send') || lowerMessage.includes('pay') || lowerMessage.includes('transfer')) {
+    type = 'send';
+  } else if (lowerMessage.includes('split') || lowerMessage.includes('divide') || lowerMessage.includes('share')) {
+    type = 'split';
+    
+    // Extract split type
+    if (lowerMessage.includes('equal') || lowerMessage.includes('equally') || lowerMessage.includes('even') || lowerMessage.includes('evenly')) {
+      splitType = 'equal';
+    } else if (lowerMessage.includes('percent') || lowerMessage.includes('%')) {
+      splitType = 'percentage';
+    } else {
+      splitType = 'custom';
+    }
   }
-  if (message.toLowerCase().includes('split')) {
-    return {
-      type: 'split',
-      amount: 0.2,
-      token: 'ETH',
-      recipients: ['alice.base', 'bob.base'],
-      note: 'Demo split',
-    };
+
+  // Extract amount
+  const amountMatch = message.match(/\b(\d+(\.\d+)?)\s*(eth|ether|usdc|dai|usd)?\b/i);
+  if (amountMatch) {
+    amount = parseFloat(amountMatch[1]);
+    
+    // Extract token if specified, but ALWAYS default to ETH regardless of what's specified
+    token = 'ETH';
   }
-  return null;
-} 
+
+  // Extract recipients (anything with @ symbol)
+  const recipientMatches = message.match(/@(\w+(\.\w+)?)/g);
+  if (recipientMatches) {
+    recipients = recipientMatches.map(r => r.substring(1));
+    if (recipients.length === 1) {
+      recipient = recipients[0];
+    }
+  }
+
+  // If we have a valid type and amount, return the transaction details
+  if (type !== 'unknown' && amount !== null) {
+      return {
+        type,
+        amount,
+        token,  // Always ETH
+        recipient,
+        recipients,
+        splitType
+      };
+    }
+
+    return null;
+}

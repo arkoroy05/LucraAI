@@ -21,14 +21,14 @@ export { useBaseName } from './hooks/useBaseName'
 export { config as wagmiConfig } from './config/wagmi'
 
 // Network Configuration
-export { 
-  BASE_MAINNET, 
-  BASE_SEPOLIA, 
-  getNetworkByChainId, 
+export {
+  BASE_MAINNET,
+  BASE_SEPOLIA,
+  getNetworkByChainId,
   getExplorerUrl,
   getAddressExplorerUrl,
   isBaseNetwork,
-  getNetworkName 
+  getNetworkName
 } from './config/networks'
 
 // Transaction Utilities
@@ -63,8 +63,4 @@ export {
   isTransactionRequest
 } from './utils/agentKit'
 
-// BaseName Utilities
-export {
-  resolveBaseName as resolveBaseNameFromBaseName,
-  lookupBaseName as lookupBaseNameFromBaseName,
-} from './utils/baseName'
+// Remove the duplicate BaseName exports since we're using baseNameResolver.js
