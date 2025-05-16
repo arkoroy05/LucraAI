@@ -206,37 +206,60 @@ export function useBaseName() {
     }
 
     try {
-      // First check if we already have a cached basename for the smart wallet
-      if (smartWalletBaseName) {
-        return smartWalletBaseName
-      }
+      // Normalize the address for cache lookups
+      const normalizedAddr = smartWalletAddress.toLowerCase()
 
       // Check if we have it in our cache
-      const normalizedAddr = smartWalletAddress.toLowerCase()
       if (nameCache[normalizedAddr]) {
+        console.log(`Cache hit for smart wallet ${smartWalletAddress}: ${nameCache[normalizedAddr]}`)
         if (isMounted.current) {
           setSmartWalletBaseName(nameCache[normalizedAddr])
         }
         return nameCache[normalizedAddr]
       }
 
-      // First check if we already have a cached basename for the connected wallet
-      // This is a common case where the smart wallet inherits the basename from the owner
-      if (baseName) {
-        console.log(`Using connected wallet's basename (${baseName}) for smart wallet display`);
-        setSmartWalletBaseName(baseName);
-        return baseName;
+      // Check if the smart wallet address is the same as the connected wallet
+      // This is unlikely but possible
+      if (address && normalizedAddr === address.toLowerCase() && baseName) {
+        console.log(`Smart wallet address matches connected wallet, using basename: ${baseName}`)
+        if (isMounted.current) {
+          setSmartWalletBaseName(baseName)
+        }
+        return baseName
       }
 
-      // Otherwise look up the smart wallet address
+      // Look up the smart wallet address
+      console.log(`Looking up Base Name for smart wallet address: ${smartWalletAddress}`)
       const name = await lookupAddress(smartWalletAddress)
-      if (name && isMounted.current) {
-        setSmartWalletBaseName(name)
+
+      if (name) {
+        console.log(`Found basename for smart wallet: ${name}`)
+        if (isMounted.current) {
+          setSmartWalletBaseName(name)
+          // Also update the cache
+          setNameCache(prev => ({ ...prev, [normalizedAddr]: name }))
+        }
         return name
-      } else if (isMounted.current) {
-        setSmartWalletBaseName(null)
-        return null
       }
+
+      // If no name was found for the smart wallet, we can use the connected wallet's basename
+      // This is a common case where the smart wallet inherits the basename from the owner
+      if (baseName) {
+        console.log(`Using connected wallet's basename (${baseName}) for smart wallet display`)
+        if (isMounted.current) {
+          setSmartWalletBaseName(baseName)
+          // Also update the cache
+          setNameCache(prev => ({ ...prev, [normalizedAddr]: baseName }))
+        }
+        return baseName
+      }
+
+      // If we get here, no basename was found
+      console.log(`No basename found for smart wallet ${smartWalletAddress}`)
+      if (isMounted.current) {
+        setSmartWalletBaseName(null)
+      }
+      return null
     } catch (err) {
       console.error('Error looking up Base Name for smart wallet:', err)
       if (isMounted.current) {
@@ -244,9 +267,7 @@ export function useBaseName() {
       }
       return null
     }
-
-    return null
-  }, [lookupAddress, baseName, nameCache, smartWalletBaseName])
+  }, [lookupAddress, address, baseName, nameCache])
 
   return {
     baseName,
