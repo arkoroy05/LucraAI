@@ -135,13 +135,7 @@ export default function Home() {
                     Get Started
                   </Button>
                 </Link>
-                {/* <Button variant="outline" className="border-white/20 text-white hover:bg-white/10 px-8 py-6 text-sm font-light tracking-wide">
-                  Learn More
-                </Button> */}
-                <ConnectWallet 
-                  onModalToggle={setIsModalActuallyOpen} 
-                  className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-8 py-6 text-sm font-light tracking-wide"
-                />
+               
               </motion.div>
             </div>
             <div className="md:w-1/2">
