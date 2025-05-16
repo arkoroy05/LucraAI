@@ -28,6 +28,8 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
     agentBalances: ownerAgentBalances
   } = useWalletBalance(null, null) // For connected wallet balance
 
+  const ownerParsedBalance = ownerDisplayBalance ? parseFloat(ownerDisplayBalance.split(' ')[0]).toFixed(2) + ' ETH' : '0 ETH'
+
   const {
     nativeDisplayBalance: smartWalletDisplayBalance,
     isNativeBalanceLoading: isSmartWalletBalanceLoading,
@@ -58,8 +60,8 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
     } else if (ownerBalances?.native?.formatted && !isNaN(parseFloat(ownerBalances.native.formatted)) && parseFloat(ownerBalances.native.formatted) > 0) {
       balanceToUse = ownerBalances.native.formatted;
     } else {
-      // Extract balance from ownerDisplayBalance if it's in the format "X.XX ETH"
-      const match = ownerDisplayBalance?.match(/^([\d.]+)\s*ETH$/i);
+      // Extract balance from parseFloat(ownerDisplayBalance.split(' ')[0]).toFixed(2) + ' ETH' if it's in the format "X.XX ETH"
+      const match = parseFloat(ownerDisplayBalance.split(' ')[0]).toFixed(2) + ' ETH'?.match(/^([\d.]+)\s*ETH$/i);
       if (match && match[1] && !isNaN(parseFloat(match[1])) && parseFloat(match[1]) > 0) {
         balanceToUse = match[1];
       }
@@ -155,13 +157,14 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
   }, [isConnected, address, smartWalletAddress, refreshOwnerBalance, refreshSmartWalletBalance])
 
   return (
-    <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-      <div className="mb-4">
-        <h3 className="text-lg font-medium text-white mb-2">Fund Smart Wallet</h3>
-        <p className="text-sm text-white/60">
-          Transfer ETH from your main wallet to your smart wallet.
-        </p>
+    <div className="p-4 bg-black rounded-xl border border-white/10">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-medium text-white">Fund Smart Wallet</h3>
+        <span className="text-sm font-medium text-green-500">1 Wallet</span>
       </div>
+      <p className="text-sm text-white/60 mb-4">
+        Transfer ETH from your main wallet to your smart wallet.
+      </p>
 
       <div className="space-y-4">
         <div className="flex justify-between items-center">
@@ -182,11 +185,11 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
             ) : (
               // Try to get the balance from multiple sources in order of preference
               ownerBalance && parseFloat(ownerBalance) > 0 ?
-                `${ownerBalance} ETH` :
-                ownerDisplayBalance && ownerDisplayBalance !== '0 ETH' ?
-                  ownerDisplayBalance :
+                `${parseFloat(ownerBalance).toFixed(2)} ETH` :
+                parseFloat(ownerDisplayBalance.split(' ')[0]).toFixed(2) + ' ETH' && parseFloat(ownerDisplayBalance.split(' ')[0]).toFixed(2) + ' ETH' !== '0 ETH' ?
+                  parseFloat(ownerDisplayBalance.split(' ')[0]).toFixed(2) + ' ETH' :
                   ownerAgentBalances?.ETH && ownerAgentBalances.ETH !== '0' ?
-                    `${ownerAgentBalances.ETH} ETH` :
+                    `${parseFloat(ownerAgentBalances.ETH).toFixed(2)} ETH` :
                     ownerBalances?.native?.formatted && ownerBalances.native.formatted !== '0' ?
                       `${ownerBalances.native.formatted} ETH` :
                       '0 ETH'
@@ -218,7 +221,7 @@ export function FundSmartWallet({ smartWalletAddress, onSuccess, onCancel }) {
             {!isSubmitting && !success && (
               // Show MAX button if any balance source indicates a positive balance
               (ownerBalance && parseFloat(ownerBalance) > 0) ||
-              (ownerDisplayBalance && ownerDisplayBalance !== '0 ETH') ||
+              (ownerParsedBalance && parseFloat(ownerParsedBalance) > 0) ||
               (ownerAgentBalances?.ETH && parseFloat(ownerAgentBalances.ETH) > 0) ||
               (ownerBalances?.native?.formatted && parseFloat(ownerBalances.native.formatted) > 0)
             ) && (

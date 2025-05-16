@@ -268,12 +268,12 @@ export default function ChatInterface() {
           if (!isConnected) {
             balanceText = 'Please connect your wallet to check your balance.';
           } else if (walletType === 'smart') {
-            balanceText = `Your smart wallet balance is ${smartWalletBalance} ETH.`;
+            balanceText = `Your smart wallet balance is ${parseFloat(smartWalletBalance).toFixed(2)} ETH.`;
           } else if (walletType === 'main') {
-            balanceText = `Your main wallet balance is ${displayBalance}.`;
+            balanceText = `Your main wallet balance is ${parseFloat(displayBalance).toFixed(2)}.`;
           } else {
             // Both wallets
-            balanceText = `Your main wallet balance is ${displayBalance}. Your smart wallet balance is ${smartWalletBalance} ETH.`;
+            balanceText = `Your main wallet balance is ${parseFloat(displayBalance).toFixed(2)}. Your smart wallet balance is ${parseFloat(smartWalletBalance).toFixed(2)} ETH.`;
           }
 
           // Update the DOM element
@@ -446,12 +446,12 @@ export default function ChatInterface() {
                   if (!isConnected) {
                     balanceText = 'Please connect your wallet to check your balance.';
                   } else if (walletType === 'smart') {
-                    balanceText = `Your smart wallet balance is ${smartWalletBalance} ETH.`;
+                    balanceText = `Your smart wallet balance is ${parseFloat(smartWalletBalance).toFixed(2)} ETH.`;
                   } else if (walletType === 'main') {
-                    balanceText = `Your main wallet balance is ${displayBalance}.`;
+                    balanceText = `Your main wallet balance is ${parseFloat(displayBalance).toFixed(2)}.`;
                   } else {
                     // Both wallets - show main wallet first, then smart wallet
-                    balanceText = `Your main wallet balance is ${displayBalance}. Your smart wallet balance is ${smartWalletBalance} ETH.`;
+                    balanceText = `Your main wallet balance is ${parseFloat(displayBalance).toFixed(2)}. Your smart wallet balance is ${parseFloat(smartWalletBalance).toFixed(2)} ETH.`;
                   }
 
                   // Update the message content
