@@ -77,34 +77,58 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
     setIsExecuting(true)
 
     try {
-      if (parsedData.intent === 'send') {
+      if (parsedData.intent === 'send' || parsedData.type === 'send') {
         // For send intent, use the first recipient
         const recipient = parsedData.recipients && parsedData.recipients.length > 0
           ? parsedData.recipients[0]
-          : null
+          : (parsedData.recipient || null)
 
         if (recipient && parsedData.amount) {
-          sendPayment(
-            `0x${recipient}`, // This is a placeholder - in a real app, you'd resolve ENS names or use proper addresses
-            parsedData.amount,
-            parsedData.token || 'ETH'
-          )
+          // Check if the recipient is a Base Name or an address
+          const isBaseName = !recipient.startsWith('0x') && (recipient.includes('.base') || recipient.includes('.eth'))
+
+          // If it's a Base Name, use it directly, otherwise prepend 0x if needed
+          const formattedRecipient = isBaseName ? recipient : (recipient.startsWith('0x') ? recipient : `0x${recipient}`)
+
+          console.log(`Executing transaction to ${formattedRecipient}`)
+
+          sendPayment({
+            to: formattedRecipient,
+            amount: parsedData.amount,
+            token: parsedData.token || 'ETH',
+            note: parsedData.note || ''
+          })
         }
-      } else if (parsedData.intent === 'split') {
+      } else if (parsedData.intent === 'split' || parsedData.type === 'split') {
         // For split intent, use all recipients
         if (parsedData.recipients && parsedData.recipients.length > 0 && parsedData.amount) {
-          // Convert recipient names to addresses (placeholder)
-          const recipientAddresses = parsedData.recipients.map(name => `0x${name}`)
+          // Format recipients properly
+          const formattedRecipients = parsedData.recipients.map(name => {
+            const isBaseName = !name.startsWith('0x') && (name.includes('.base') || name.includes('.eth'))
+            return isBaseName ? name : (name.startsWith('0x') ? name : `0x${name}`)
+          })
+
+          console.log(`Executing split payment between ${formattedRecipients.join(', ')}`)
 
           splitPayment(
-            recipientAddresses,
+            formattedRecipients,
             parsedData.amount,
-            parsedData.token || 'ETH'
+            parsedData.token || 'ETH',
+            parsedData.note || ''
           )
         }
+      } else if (parsedData.intent === 'check_balance' || parsedData.type === 'check_balance') {
+        // For balance check, we don't need to execute a transaction
+        console.log('Balance check requested, no transaction needed')
+        setIsExecuting(false)
+      } else if (parsedData.intent === 'transaction_history' || parsedData.type === 'transaction_history') {
+        // For transaction history, we don't need to execute a transaction
+        console.log('Transaction history requested, no transaction needed')
+        setIsExecuting(false)
       }
     } catch (error) {
       console.error('Transaction error:', error)
+      setIsExecuting(false)
     }
   }
 

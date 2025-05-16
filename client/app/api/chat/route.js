@@ -338,6 +338,10 @@ async function generateAIResponse(parsedData, walletAddress) {
     return `🤖 I'm sorry, I couldn't understand that request. Could you please rephrase it?`;
   }
 
+  // We're only using Gemini for parsing, not AgentKit
+  // This comment is kept to document the change
+  console.log('Using only Gemini parsed data, skipping AgentKit parsing');
+
   // Handle conversational queries
   if (isConversational || intent === 'conversation') {
     return await generateConversationalResponse(query);

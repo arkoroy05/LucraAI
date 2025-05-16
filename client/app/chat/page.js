@@ -631,21 +631,16 @@ export default function ChatInterface() {
       if (chatContainer) {
         // Create user message element
         const userMessageEl = document.createElement('div');
-        userMessageEl.className = 'message user-message mb-6';
+        userMessageEl.className = 'message user-message mb-6 flex justify-end';
         userMessageEl.setAttribute('data-message-id', userMessage.id);
         userMessageEl.setAttribute('data-role', 'user');
         userMessageEl.innerHTML = `
-          <div class="flex items-start gap-4">
-            <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
-                <circle cx="12" cy="7" r="4"></circle>
-              </svg>
+          <div class="flex items-start max-w-[80%] gap-4 flex-row-reverse">
+            <div class="h-10 w-10 border border-white/10 ring-2 ring-white/10 bg-purple-500/80 rounded-full flex items-center justify-center">
+              <div class="flex items-center justify-center h-full text-white text-sm font-medium">U</div>
             </div>
-            <div class="flex-1">
-              <div class="message-content prose prose-invert">
-                <p>${userMessage.content}</p>
-              </div>
+            <div class="rounded-2xl p-5 text-sm leading-relaxed message-content bg-purple-500/30 text-white backdrop-blur-sm">
+              <p>${userMessage.content}</p>
             </div>
           </div>
         `;
@@ -653,25 +648,16 @@ export default function ChatInterface() {
 
         // Create AI response element
         const aiMessageEl = document.createElement('div');
-        aiMessageEl.className = 'message ai-message mb-6';
+        aiMessageEl.className = 'message ai-message mb-6 flex justify-start';
         aiMessageEl.setAttribute('data-message-id', aiResponse.id);
         aiMessageEl.setAttribute('data-role', 'assistant');
         aiMessageEl.innerHTML = `
-          <div class="flex items-start gap-4">
-            <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 8V4H8"></path>
-                <rect width="16" height="12" x="4" y="8" rx="2"></rect>
-                <path d="M2 14h2"></path>
-                <path d="M20 14h2"></path>
-                <path d="M15 13v2"></path>
-                <path d="M9 13v2"></path>
-              </svg>
+          <div class="flex items-start max-w-[80%] gap-4 flex-row">
+            <div class="h-10 w-10 border border-white/10 ring-2 ring-white/10 bg-white/10 rounded-full flex items-center justify-center">
+              <div class="flex items-center justify-center h-full text-white text-sm font-medium">AI</div>
             </div>
-            <div class="flex-1">
-              <div class="message-content prose prose-invert">
-                <p>${aiResponse.content}</p>
-              </div>
+            <div class="rounded-2xl p-5 text-sm leading-relaxed message-content bg-white/10 text-white/90 backdrop-blur-sm border border-white/10">
+              <p>${aiResponse.content}</p>
               <div class="transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
                 <div class="flex justify-between items-center mb-2">
                   <span class="text-white/60">

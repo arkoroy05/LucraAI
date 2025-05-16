@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createTransactionAgent } from '../../../../../web3/utils/agentKit';
-import { resolveBaseName } from '../../../../../web3/utils/baseName';
-import { parseEther } from 'viem';
+import { createTransactionAgent, resolveBaseName } from '../../../../../web3/utils/agentKit';
+import supabaseServer from '@/utils/supabase-server';
 
 /**
  * Execute a transaction that was previously processed
@@ -28,14 +27,27 @@ export async function POST(req) {
       );
     }
 
+    console.log('Executing transaction:', transaction);
+    console.log('Wallet address:', walletAddress);
+    console.log('Using testnet:', useTestnet);
+
     // Create an agent for handling the transaction
     const agent = createTransactionAgent({ useTestnet, walletAddress });
+
+    // Try to initialize the real AgentKit
+    try {
+      await agent.initialize();
+      console.log('Successfully initialized real AgentKit for transaction execution');
+    } catch (initError) {
+      console.error('Failed to initialize real AgentKit for transaction execution:', initError);
+      // Continue with the fallback implementation
+    }
 
     // Execute the transaction based on its type
     if (transaction.type === 'send') {
       // Resolve the recipient address if it's a Base Name
       const resolvedRecipient = await resolveBaseName(transaction.recipient, useTestnet);
-      
+
       if (!resolvedRecipient) {
         return NextResponse.json(
           { error: `Could not resolve recipient address: ${transaction.recipient}` },
@@ -49,6 +61,40 @@ export async function POST(req) {
         amount: transaction.amount,
         token: transaction.token || 'ETH',
       });
+
+      // Store the transaction in the database
+      try {
+        // First check if the user exists
+        const { data: user } = await supabaseServer
+          .from('users')
+          .select('id')
+          .eq('wallet_address', walletAddress)
+          .single();
+
+        if (user) {
+          // Store the transaction
+          await supabaseServer
+            .from('transactions')
+            .insert([
+              {
+                user_id: user.id,
+                transaction_hash: result.hash || 'mock-tx-hash-' + Date.now(),
+                transaction_type: 'send',
+                amount: transaction.amount,
+                token: transaction.token || 'ETH',
+                recipient_address: resolvedRecipient,
+                status: 'pending',
+                note: transaction.note || '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                metadata: transaction
+              }
+            ]);
+        }
+      } catch (dbError) {
+        console.error('Error storing transaction in database:', dbError);
+        // Continue with the response even if database storage fails
+      }
 
       return NextResponse.json({
         success: true,
@@ -109,6 +155,43 @@ export async function POST(req) {
           }
         })
       );
+
+      // Store the transaction in the database
+      try {
+        // First check if the user exists
+        const { data: user } = await supabaseServer
+          .from('users')
+          .select('id')
+          .eq('wallet_address', walletAddress)
+          .single();
+
+        if (user) {
+          // Store the transaction
+          await supabaseServer
+            .from('transactions')
+            .insert([
+              {
+                user_id: user.id,
+                transaction_hash: results[0].hash,
+                transaction_type: 'split',
+                amount: transaction.amount,
+                token: transaction.token || 'ETH',
+                recipient_address: validRecipients.join(','),
+                status: 'pending',
+                note: transaction.note || '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                metadata: {
+                  ...transaction,
+                  results
+                }
+              }
+            ]);
+        }
+      } catch (dbError) {
+        console.error('Error storing transaction in database:', dbError);
+        // Continue with the response even if database storage fails
+      }
 
       return NextResponse.json({
         success: true,

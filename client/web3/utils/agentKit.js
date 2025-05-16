@@ -1,6 +1,7 @@
 /**
  * AgentKit integration for LucraAI
  * This provides functionality for processing natural language transaction requests
+ * Browser-compatible version that doesn't rely on Node.js-specific modules
  */
 
 import { formatEther, parseEther, createPublicClient, http } from 'viem';
@@ -19,8 +20,12 @@ const baseSepoliaClient = createPublicClient({
   transport: http(BASE_SEPOLIA.rpcUrls.default),
 });
 
+// We'll implement caching in a future update if needed
+
 /**
  * AgentKit class for handling transaction requests
+ * This is a browser-compatible implementation that doesn't rely on @coinbase/agentkit
+ * which has Node.js dependencies
  */
 class AgentKit {
   constructor(config) {
@@ -28,6 +33,37 @@ class AgentKit {
     this.description = config.description || 'LucraAI transaction agent';
     this.instructions = config.instructions || '';
     this.capabilities = config.capabilities || {};
+    this.isInitialized = false;
+    this.isInitializing = false;
+    this.initializationError = null;
+    this.networkId = config.networkId || 'base-sepolia';
+    this.walletAddress = config.walletAddress;
+  }
+
+  /**
+   * Initialize the AgentKit instance
+   * This is a placeholder for the real AgentKit initialization
+   * In a browser environment, we can't use the real AgentKit due to Node.js dependencies
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+    if (this.isInitialized || this.isInitializing) return;
+
+    try {
+      this.isInitializing = true;
+
+      // In a browser environment, we can't use the real AgentKit
+      // So we'll just mark it as initialized and use our custom implementation
+      console.log('Using browser-compatible AgentKit implementation');
+
+      this.isInitialized = true;
+      this.isInitializing = false;
+    } catch (error) {
+      console.error('Error initializing AgentKit:', error);
+      this.initializationError = error;
+      this.isInitializing = false;
+      throw error;
+    }
   }
 
   /**
@@ -55,11 +91,15 @@ class AgentKit {
         let response;
         if (details.type === 'send') {
           const recipient = Array.isArray(details.recipients) ? details.recipients[0] : details.recipient;
-          response = `I'll process your request to send ${details.amount} ${details.token} to ${recipient}.`;
+          response = `I've prepared a transaction to send ${details.amount} ${details.token} to ${recipient}.`;
         } else if (details.type === 'split') {
-          response = `I'll process your request to split ${details.amount} ${details.token} between ${details.recipients.join(', ')}.`;
+          response = `I've prepared a request to split ${details.amount} ${details.token} between ${details.recipients.join(', ')}.`;
+        } else if (details.type === 'check_balance') {
+          response = `I'll check your wallet balance.`;
+        } else if (details.type === 'transaction_history') {
+          response = `I'll show your transaction history.`;
         } else {
-          response = `I'll process your ${details.type} request for ${details.amount} ${details.token}.`;
+          response = `I've prepared your ${details.type} request for ${details.amount} ${details.token}.`;
         }
 
         return {
@@ -100,6 +140,7 @@ class AgentKit {
 export function createTransactionAgent({ useTestnet = false, walletAddress, smartWalletAddress }) {
   const client = useTestnet ? baseSepoliaClient : baseClient;
   const chain = useTestnet ? baseSepolia : base;
+  const networkId = useTestnet ? 'base-sepolia' : 'base-mainnet';
 
   // Use smart wallet address if provided, otherwise use the connected wallet address
   const targetAddress = smartWalletAddress || walletAddress;
@@ -110,6 +151,7 @@ export function createTransactionAgent({ useTestnet = false, walletAddress, smar
     console.log(`Creating agent for address: ${targetAddress} (${smartWalletAddress ? 'smart wallet' : 'connected wallet'})`);
   }
 
+  // Create a new agent
   const agent = new AgentKit({
     name: 'LucraAI Transaction Agent',
     description: 'An agent that helps with cryptocurrency transactions on Base',
@@ -124,6 +166,8 @@ export function createTransactionAgent({ useTestnet = false, walletAddress, smar
 
       Always verify transaction details before executing them.
     `,
+    networkId,
+    walletAddress: targetAddress,
     capabilities: {
       sendTransaction: {
         enabled: true,
@@ -180,17 +224,19 @@ export function createTransactionAgent({ useTestnet = false, walletAddress, smar
             console.log(`Fetching balance for address: ${targetAddress} on ${chain.name}`);
 
             try {
-              // Fetch the balance from the blockchain with a timeout
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+              // Initialize the agent if needed
+              if (!agent.isInitialized && !agent.initializationError) {
+                try {
+                  await agent.initialize();
+                } catch (initError) {
+                  console.error('Failed to initialize agent for balance check:', initError);
+                }
+              }
 
-              // Fetch the balance from the blockchain
+              // Fetch balance using viem
               const balance = await client.getBalance({
                 address: targetAddress,
               });
-
-              // Clear the timeout
-              clearTimeout(timeoutId);
 
               // Format the balance for display
               const formattedBalance = formatEther(balance);
@@ -321,7 +367,17 @@ export async function processTransactionRequest({ message, useTestnet = false, w
     // Create an agent for handling the transaction
     const agent = createTransactionAgent({ useTestnet, walletAddress });
 
-    // Process the message
+    // Initialize the agent
+    if (!agent.isInitialized && !agent.initializationError) {
+      try {
+        await agent.initialize();
+        console.log('Successfully initialized agent for transaction processing');
+      } catch (initError) {
+        console.error('Failed to initialize agent for transaction processing:', initError);
+      }
+    }
+
+    // Process the message using our implementation
     return await agent.process(message);
   } catch (error) {
     console.error('Error processing transaction request:', error);
@@ -372,14 +428,13 @@ export function isTransactionRequest(message) {
   // Check for transaction-related keywords
   const sendKeywords = ['send', 'transfer', 'pay', 'payment'];
   const splitKeywords = ['split', 'divide', 'share'];
-  const checkKeywords = ['check balance', 'show balance', 'wallet balance', 'my balance'];
+  // Balance check keywords are used in the special case below
   const historyKeywords = ['transaction history', 'payment history', 'recent transactions'];
   const tokenKeywords = ['eth', 'ether', 'usdc', 'dai', 'crypto', 'token', 'coin'];
 
   // Check if the message contains transaction-related keywords
   const hasSendKeyword = sendKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasSplitKeyword = splitKeywords.some(keyword => lowerMessage.includes(keyword));
-  const hasCheckKeyword = checkKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasHistoryKeyword = historyKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasTokenKeyword = tokenKeywords.some(keyword => lowerMessage.includes(keyword));
 
@@ -415,6 +470,7 @@ export async function extractTransactionDetails(message) {
   let recipient = null;
   let recipients = [];
   let splitType = null;
+  let note = null;
 
   // Check for check balance intent - be more specific to avoid false positives
   if ((lowerMessage.includes('balance') && (lowerMessage.includes('wallet') || lowerMessage.includes('my'))) ||
@@ -435,10 +491,10 @@ export async function extractTransactionDetails(message) {
   // Check for transaction history intent
   if (lowerMessage.includes('history') ||
       lowerMessage.includes('transactions') ||
-      lowerMessage.includes('recent') &&
-      lowerMessage.includes('transaction')) {
+      (lowerMessage.includes('recent') && lowerMessage.includes('transaction'))) {
       return {
         type: 'transaction_history',
+        intent: 'transaction_history',
         limit: 10,
         token: 'ETH'  // Always use ETH
       };
@@ -478,15 +534,23 @@ export async function extractTransactionDetails(message) {
     }
   }
 
+  // Extract note (anything after "for" or "note")
+  const noteMatch = lowerMessage.match(/\b(for|note)\b\s+(.+)$/);
+  if (noteMatch) {
+    note = noteMatch[2];
+  }
+
   // If we have a valid type and amount, return the transaction details
   if (type !== 'unknown' && amount !== null) {
       return {
         type,
+        intent: type, // Add intent field for compatibility with the UI
         amount,
         token,  // Always ETH
         recipient,
         recipients,
-        splitType
+        splitType,
+        note
       };
     }
 

@@ -129,12 +129,12 @@ export function useAITransactions() {
               throw new Error('Invalid recipient address');
             }
 
-            await sendPayment(
-              details.recipient,
-              details.amount,
-              details.token || 'ETH',
-              details.note || ''
-            );
+            await sendPayment({
+              to: details.recipient,
+              amount: details.amount,
+              token: details.token || 'ETH',
+              note: details.note || ''
+            });
 
             console.log('Send payment executed successfully');
           } else if (details.type === 'split') {
@@ -142,6 +142,7 @@ export function useAITransactions() {
               throw new Error('No recipients specified for split payment');
             }
 
+            // splitPayment expects separate parameters, not an object
             await splitPayment(
               details.recipients,
               details.amount,

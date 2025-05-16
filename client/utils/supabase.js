@@ -458,8 +458,12 @@ export const addMessageToConversation = async (conversationId, userId, message, 
     });
 
     if (!conversationId || !userId || !message) {
-      console.error('Missing required parameters for addMessageToConversation')
-      return null
+      console.error('Missing required parameters for addMessageToConversation', {
+        conversationId: !!conversationId,
+        userId: !!userId,
+        message: !!message
+      });
+      return null;
     }
 
     // Ensure conversationId is a number
@@ -474,41 +478,111 @@ export const addMessageToConversation = async (conversationId, userId, message, 
 
     console.log('Using numeric conversation ID:', numericConversationId);
 
+    // First, verify that the conversation exists
+    const { data: conversation, error: conversationError } = await supabase
+      .from('chat_conversations')
+      .select('id')
+      .eq('id', numericConversationId)
+      .single();
+
+    if (conversationError || !conversation) {
+      console.error('Conversation not found or error checking conversation:',
+        conversationError || 'Conversation not found');
+      return null;
+    }
+
+    // Verify that the user exists
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !user) {
+      console.error('User not found or error checking user:',
+        userError || 'User not found');
+      return null;
+    }
+
     // Skip the RPC call and directly insert into the chat_history table
     // This avoids the issue with multiple function signatures in the database
     try {
+      // Prepare the message data
+      const messageData = {
+        user_id: userId,
+        conversation_id: numericConversationId,
+        message: message,
+        is_user: isUser,
+        created_at: new Date().toISOString()
+      };
+
+      // Only add metadata if it's not null or undefined
+      if (metadata !== null && metadata !== undefined) {
+        messageData.metadata = metadata;
+      }
+
+      console.log('Inserting message with data:', messageData);
+
       const { data: newMessage, error: insertError } = await supabase
         .from('chat_history')
-        .insert({
-          user_id: userId,
-          conversation_id: numericConversationId,
-          message: message,
-          is_user: isUser,
-          created_at: new Date().toISOString(),
-          metadata: metadata
-        })
+        .insert(messageData)
         .select('id')
         .single();
 
       if (insertError) {
-        console.error('Error adding message directly:', insertError)
-        return null
+        console.error('Error adding message directly:', insertError);
+
+        // Try using the server API as a fallback
+        try {
+          console.log('Trying server API fallback for adding message');
+
+          const response = await fetch('/api/conversations/add-message', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              conversationId: numericConversationId,
+              userId,
+              message,
+              isUser,
+              metadata
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Error response from add-message API:', errorData);
+            return null;
+          }
+
+          const data = await response.json();
+          return data.messageId || null;
+        } catch (apiError) {
+          console.error('Error calling add-message API:', apiError);
+          return null;
+        }
       }
 
       // Update the conversation's updated_at timestamp
-      await supabase
+      const { error: updateError } = await supabase
         .from('chat_conversations')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', numericConversationId);
 
-      return newMessage?.id || null
+      if (updateError) {
+        console.error('Error updating conversation timestamp:', updateError);
+        // Continue anyway since the message was added successfully
+      }
+
+      return newMessage?.id || null;
     } catch (error) {
-      console.error('Error adding message to conversation:', error)
-      return null
+      console.error('Error adding message to conversation:', error);
+      return null;
     }
   } catch (error) {
-    console.error('Error adding message to conversation:', error)
-    return null
+    console.error('Error adding message to conversation:', error);
+    return null;
   }
 }
 
