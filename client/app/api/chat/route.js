@@ -448,7 +448,7 @@ async function generateAIResponse(parsedData, walletAddress) {
         }
       }
       // Check if we need to specify a wallet type
-      let walletType = 'both';
+      let walletType = parsedData.walletType || 'both';
 
       // Get the raw message from parsedData to check for wallet type
       const rawMessage = parsedData.raw_message || '';

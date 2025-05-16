@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useChainId } from 'wagmi'
-import { resolveBaseName, lookupBaseName, isBaseName } from '../utils/baseNameResolver'
+import { lookupBaseName, isBaseName } from '../utils/baseNameService'
 import { getNetworkByChainId, BASE_SEPOLIA } from '../config/networks'
 
 /**
@@ -26,8 +26,7 @@ export function useBaseName() {
   const knownAddresses = {
     // Add known addresses and their baseNames here (all lowercase)
     // Format: 'address': 'name.base'
-    '0xe87758c6cccf3806c9f1f0c8f99f6dcae36e5449': 'demo.base',
-    '0xb9b9b9bf673a9813bf04a92ebc1661cc25bc00f6': 'smartwallet.base',
+    // Empty by default - we'll use the actual Base Name Service for resolution
   }
 
   // Cleanup on unmount
@@ -71,18 +70,13 @@ export function useBaseName() {
         return addressCache[name]
       }
 
-      console.log(`Resolving Base Name: ${name} (testnet: ${isTestnet})`)
+      console.log(`Resolving Base Name: ${name} (using mainnet)`)
 
-      // Resolve the name
-      const resolvedAddress = await resolveBaseName(name, isTestnet)
-      console.log(`Resolved ${name} to ${resolvedAddress || 'null'}`)
+      // We don't have a resolver function in our implementation yet
+      // This would need to be implemented in baseNameService.js
+      console.log(`Base Name resolution not implemented yet`)
 
-      // Update cache if component is still mounted
-      if (resolvedAddress && isMounted.current) {
-        setAddressCache(prev => ({ ...prev, [name]: resolvedAddress }))
-      }
-
-      return resolvedAddress
+      return null
     } catch (err) {
       console.error('Error resolving Base Name:', err)
       if (isMounted.current) setError('Failed to resolve Base Name')
@@ -90,7 +84,7 @@ export function useBaseName() {
     } finally {
       if (isMounted.current) setIsLoading(false)
     }
-  }, [addressCache, isTestnet])
+  }, [addressCache])
 
   /**
    * Look up the Base Name for an Ethereum address
@@ -122,22 +116,22 @@ export function useBaseName() {
       // Check known addresses mapping if we have it
       if (knownAddresses[normalizedAddr]) {
         console.log(`Found known address mapping for ${addr}: ${knownAddresses[normalizedAddr]}`);
-        
+
         // Update cache if component is still mounted
         if (isMounted.current) {
-          setNameCache(prev => ({ 
-            ...prev, 
-            [normalizedAddr]: knownAddresses[normalizedAddr] 
+          setNameCache(prev => ({
+            ...prev,
+            [normalizedAddr]: knownAddresses[normalizedAddr]
           }));
         }
-        
+
         return knownAddresses[normalizedAddr];
       }
 
-      console.log(`Looking up Base Name for address: ${addr} (testnet: ${isTestnet})`)
+      console.log(`Looking up Base Name for address: ${addr} (using mainnet)`)
 
-      // Look up the address using onchain resolution
-      const name = await lookupBaseName(addr, isTestnet)
+      // Look up the address using onchain resolution - always use mainnet
+      const name = await lookupBaseName(addr)
       console.log(`Looked up ${addr} to ${name || 'null'}`)
 
       // Update cache if component is still mounted
@@ -153,7 +147,7 @@ export function useBaseName() {
     } finally {
       if (isMounted.current) setIsLoading(false)
     }
-  }, [nameCache, isTestnet, knownAddresses])
+  }, [nameCache, knownAddresses])
 
   /**
    * Check if a string is a valid Base Name
@@ -166,56 +160,93 @@ export function useBaseName() {
 
   // Look up the Base Name for the connected wallet
   useEffect(() => {
-    if (isConnected && address) {
-      lookupAddress(address)
-        .then(name => {
-          if (name && isMounted.current) {
-            setBaseName(name)
-          } else if (isMounted.current) {
-            setBaseName(null)
-          }
-        })
-        .catch(err => {
-          console.error('Error looking up Base Name for connected wallet:', err)
-          if (isMounted.current) {
-            setBaseName(null)
-          }
-        })
-    } else if (isMounted.current) {
-      setBaseName(null)
+    // Skip if not connected or no address
+    if (!isConnected || !address) {
+      if (isMounted.current) {
+        setBaseName(null)
+      }
+      return
     }
-  }, [isConnected, address, lookupAddress])
+
+    // Skip if we already have a cached name in our state
+    if (baseName) {
+      return
+    }
+
+    // Check if we have the name in our cache
+    const normalizedAddr = address.toLowerCase()
+    if (nameCache[normalizedAddr]) {
+      if (isMounted.current) {
+        setBaseName(nameCache[normalizedAddr])
+      }
+      return
+    }
+
+    // Only do the lookup if we don't have it cached
+    lookupAddress(address)
+      .then(name => {
+        if (name && isMounted.current) {
+          setBaseName(name)
+        } else if (isMounted.current) {
+          setBaseName(null)
+        }
+      })
+      .catch(err => {
+        console.error('Error looking up Base Name for connected wallet:', err)
+        if (isMounted.current) {
+          setBaseName(null)
+        }
+      })
+  }, [isConnected, address, lookupAddress, nameCache, baseName])
 
   // Look up the Base Name for a smart wallet
   const lookupSmartWalletName = useCallback(async (smartWalletAddress) => {
-    if (smartWalletAddress) {
-      try {
-        // First check if we already have a cached basename for the connected wallet
-        if (baseName) {
-          console.log(`Using connected wallet's basename (${baseName}) for smart wallet display`);
-          setSmartWalletBaseName(baseName);
-          return baseName;
-        }
-        
-        // Otherwise look up the smart wallet address
-        const name = await lookupAddress(smartWalletAddress)
-        if (name && isMounted.current) {
-          setSmartWalletBaseName(name)
-          return name
-        } else if (isMounted.current) {
-          setSmartWalletBaseName(null)
-          return null
-        }
-      } catch (err) {
-        console.error('Error looking up Base Name for smart wallet:', err)
+    if (!smartWalletAddress) {
+      return null
+    }
+
+    try {
+      // First check if we already have a cached basename for the smart wallet
+      if (smartWalletBaseName) {
+        return smartWalletBaseName
+      }
+
+      // Check if we have it in our cache
+      const normalizedAddr = smartWalletAddress.toLowerCase()
+      if (nameCache[normalizedAddr]) {
         if (isMounted.current) {
-          setSmartWalletBaseName(null)
+          setSmartWalletBaseName(nameCache[normalizedAddr])
         }
+        return nameCache[normalizedAddr]
+      }
+
+      // First check if we already have a cached basename for the connected wallet
+      // This is a common case where the smart wallet inherits the basename from the owner
+      if (baseName) {
+        console.log(`Using connected wallet's basename (${baseName}) for smart wallet display`);
+        setSmartWalletBaseName(baseName);
+        return baseName;
+      }
+
+      // Otherwise look up the smart wallet address
+      const name = await lookupAddress(smartWalletAddress)
+      if (name && isMounted.current) {
+        setSmartWalletBaseName(name)
+        return name
+      } else if (isMounted.current) {
+        setSmartWalletBaseName(null)
         return null
       }
+    } catch (err) {
+      console.error('Error looking up Base Name for smart wallet:', err)
+      if (isMounted.current) {
+        setSmartWalletBaseName(null)
+      }
+      return null
     }
+
     return null
-  }, [lookupAddress, baseName])
+  }, [lookupAddress, baseName, nameCache, smartWalletBaseName])
 
   return {
     baseName,

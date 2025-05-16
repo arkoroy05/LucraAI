@@ -9,17 +9,11 @@ import { useBaseName } from '../hooks/useBaseName'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { Wallet, Plus, Trash2, ExternalLink, RefreshCw, ArrowUpDown, Tag } from 'lucide-react'
-import { formatAddressOrName } from '../utils/baseNameResolver'
+import { formatAddressOrName } from '../utils/baseNameService'
 import { getExplorerUrl } from '../config/networks'
 import { FundSmartWallet } from './FundSmartWallet'
 
-// Known address to BaseName mappings for UI display
-const knownAddresses = {
-  // Add known addresses and their baseNames here (all lowercase)
-  // Format: 'address': 'name.base'
-  '0xe87758c6cccf3806c9f1f0c8f99f6dcae36e5449': 'demo.base',
-  '0xb9b9b9bf673a9813bf04a92ebc1661cc25bc00f6': 'smartwallet.base',
-}
+// We'll use the actual Base Name Service for resolution instead of hardcoded mappings
 
 /**
  * SmartWalletUI component that provides UI for creating and managing Smart Wallets
@@ -69,38 +63,38 @@ export function SmartWalletUI() {
     }
   }, [mappedWallets, selectedWallet])
 
+  // Reset the walletBaseName when the selected wallet changes
+  useEffect(() => {
+    setWalletBaseName(null)
+  }, [selectedWallet?.address])
+
   // Look up the Base Name for the selected wallet
   useEffect(() => {
-    if (selectedWallet?.address) {
-      // First check if the connected wallet has a basename
-      lookupAddress(address)
-        .then(ownerBaseName => {
-          if (ownerBaseName) {
-            setWalletBaseName(ownerBaseName);
-          } else {
-            // If the owner wallet doesn't have a basename, check if the smart wallet has one
-            lookupSmartWalletName(selectedWallet.address)
-              .then(smartWalletName => {
-                if (smartWalletName) {
-                  setWalletBaseName(smartWalletName);
-                } else {
-                  setWalletBaseName(null);
-                }
-              })
-              .catch(err => {
-                console.error('Error looking up Base Name for smart wallet:', err);
-                setWalletBaseName(null);
-              });
-          }
-        })
-        .catch(err => {
-          console.error('Error looking up Base Name for owner wallet:', err);
-          setWalletBaseName(null);
-        });
-    } else {
+    // Skip if no wallet is selected
+    if (!selectedWallet?.address) {
       setWalletBaseName(null);
+      return;
     }
-  }, [selectedWallet, lookupSmartWalletName, lookupAddress, address]);
+
+    // Skip if we already have a basename
+    if (walletBaseName) {
+      return;
+    }
+
+    // Use the smart wallet lookup function which has built-in caching
+    lookupSmartWalletName(selectedWallet.address)
+      .then(smartWalletName => {
+        if (smartWalletName) {
+          setWalletBaseName(smartWalletName);
+        } else {
+          setWalletBaseName(null);
+        }
+      })
+      .catch(err => {
+        console.error('Error looking up Base Name for smart wallet:', err);
+        setWalletBaseName(null);
+      });
+  }, [selectedWallet, lookupSmartWalletName, walletBaseName]);
 
   // Handle creating a new Smart Wallet
   const handleCreateWallet = async () => {
@@ -331,10 +325,6 @@ export function SmartWalletUI() {
               <h4 className="text-xs font-medium text-white/60 mb-2">Your Wallets</h4>
               <div className="space-y-1">
                 {mappedWallets.map((wallet) => {
-                  // Check if there's a known BaseName for this wallet
-                  const knownBaseName = Object.entries(knownAddresses || {})
-                    .find(([addr]) => addr.toLowerCase() === wallet.address.toLowerCase())?.[1];
-
                   return (
                   <div
                     key={wallet.address}
@@ -346,15 +336,8 @@ export function SmartWalletUI() {
                     onClick={() => setSelectedWallet(wallet)}
                   >
                       <span className="text-sm text-white flex items-center gap-1">
-                        {knownBaseName ? (
-                          <>
-                            <Tag className="h-3 w-3 text-purple-400" />
-                            <span>{knownBaseName}</span>
-                          </>
-                        ) : (
-                          formatAddressOrName(wallet.address)
-                        )}
-                    </span>
+                        {formatAddressOrName(wallet.address)}
+                      </span>
                     <span className="text-xs text-white/60">
                         {wallet.network_id
                           ? (wallet.network_id.includes('sepolia') ? 'Testnet' : 'Mainnet')
