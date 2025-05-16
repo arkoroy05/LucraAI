@@ -53,6 +53,7 @@ export function SmartWalletUI() {
   const {
     lookupAddress,
     baseName,
+    smartWalletBaseName,
     lookupSmartWalletName
   } = useBaseName()
 
@@ -76,14 +77,15 @@ export function SmartWalletUI() {
       return;
     }
 
-    // Skip if we already have a basename
-    if (walletBaseName) {
-      return;
-    }
+    // Always refresh the basename when the selected wallet changes
+    setWalletBaseName(null);
+
+    console.log('Looking up basename for smart wallet:', selectedWallet.address);
 
     // Use the smart wallet lookup function which has built-in caching
     lookupSmartWalletName(selectedWallet.address)
       .then(smartWalletName => {
+        console.log('Smart wallet basename lookup result:', smartWalletName);
         if (smartWalletName) {
           setWalletBaseName(smartWalletName);
         } else {
@@ -94,7 +96,7 @@ export function SmartWalletUI() {
         console.error('Error looking up Base Name for smart wallet:', err);
         setWalletBaseName(null);
       });
-  }, [selectedWallet, lookupSmartWalletName, walletBaseName]);
+  }, [selectedWallet, lookupSmartWalletName]);
 
   // Handle creating a new Smart Wallet
   const handleCreateWallet = async () => {
@@ -250,10 +252,10 @@ export function SmartWalletUI() {
             <div className="p-3 bg-white/5 rounded-lg border border-white/10">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-white font-medium flex items-center gap-1">
-                  {walletBaseName ? (
+                  {walletBaseName || smartWalletBaseName ? (
                     <>
                       <Tag className="h-3 w-3 text-purple-400" />
-                      <span>{walletBaseName}</span>
+                      <span>{walletBaseName || smartWalletBaseName}</span>
                     </>
                   ) : (
                     <>
