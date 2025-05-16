@@ -100,10 +100,10 @@ class AgentKit {
 export function createTransactionAgent({ useTestnet = false, walletAddress, smartWalletAddress }) {
   const client = useTestnet ? baseSepoliaClient : baseClient;
   const chain = useTestnet ? baseSepolia : base;
-  
+
   // Use smart wallet address if provided, otherwise use the connected wallet address
   const targetAddress = smartWalletAddress || walletAddress;
-  
+
   if (!targetAddress) {
     console.error('No wallet address provided to createTransactionAgent');
   } else {
@@ -177,64 +177,85 @@ export function createTransactionAgent({ useTestnet = false, walletAddress, smar
               throw new Error('Wallet address is required to fetch balance');
             }
 
-            console.log(`Fetching balance for address: ${targetAddress}`);
+            console.log(`Fetching balance for address: ${targetAddress} on ${chain.name}`);
 
-            // Fetch the balance from the blockchain
-            const balance = await client.getBalance({
-              address: targetAddress,
-            });
+            try {
+              // Fetch the balance from the blockchain with a timeout
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-            // Format the balance for display
-            const formattedBalance = formatEther(balance);
-            
-            console.log(`Fetched balance: ${formattedBalance} ETH for address ${targetAddress}`);
+              // Fetch the balance from the blockchain
+              const balance = await client.getBalance({
+                address: targetAddress,
+              });
 
-            return {
-              balance: formattedBalance,
-              token: 'ETH',
-              chain: chain.name,
-            };
-          } catch (error) {
-            console.error('Error in getBalance handler:', error);
+              // Clear the timeout
+              clearTimeout(timeoutId);
 
-            // Try up to 3 times with increasing delays between retries
-            for (let retry = 1; retry <= 3; retry++) {
-              try {
-                console.log(`Retry attempt ${retry} for getBalance...`);
-                
-                // Add an increasing delay before retrying
-                await new Promise(resolve => setTimeout(resolve, retry * 200));
-                
-                // Try fetch again
-                const balance = await client.getBalance({
-                  address: targetAddress,
-                });
-                
-                // Format the balance for display
-                const formattedBalance = formatEther(balance);
-                
-                console.log(`Successfully retrieved balance on retry ${retry}: ${formattedBalance} ETH for address ${targetAddress}`);
-                
-                return {
-                  balance: formattedBalance,
-                  token: 'ETH',
-                  chain: chain.name,
-                };
-              } catch (retryError) {
-                console.error(`Error on retry ${retry}:`, retryError);
-                
-                // If this is the last retry and it failed, continue to fallback
-                if (retry === 3) {
-                  console.warn('All retry attempts failed, returning default balance');
+              // Format the balance for display
+              const formattedBalance = formatEther(balance);
+
+              console.log(`Fetched balance: ${formattedBalance} ETH for address ${targetAddress}`);
+
+              return {
+                balance: formattedBalance,
+                token: 'ETH',
+                chain: chain.name,
+              };
+            } catch (initialError) {
+              console.error('Initial balance fetch failed:', initialError);
+
+              // Try up to 3 times with increasing delays between retries
+              for (let retry = 1; retry <= 3; retry++) {
+                try {
+                  console.log(`Retry attempt ${retry} for getBalance...`);
+
+                  // Add an increasing delay before retrying
+                  await new Promise(resolve => setTimeout(resolve, retry * 500));
+
+                  // Try fetch again
+                  const balance = await client.getBalance({
+                    address: targetAddress,
+                  });
+
+                  // Format the balance for display
+                  const formattedBalance = formatEther(balance);
+
+                  console.log(`Successfully retrieved balance on retry ${retry}: ${formattedBalance} ETH for address ${targetAddress}`);
+
+                  return {
+                    balance: formattedBalance,
+                    token: 'ETH',
+                    chain: chain.name,
+                  };
+                } catch (retryError) {
+                  console.error(`Error on retry ${retry}:`, retryError);
+
+                  // If this is the last retry and it failed, continue to fallback
+                  if (retry === 3) {
+                    console.warn('All retry attempts failed, returning default balance');
+                  }
                 }
               }
             }
-            
+
             // If all retries fail, return a default balance of 0
+            console.warn(`Returning default balance of 0 ETH for ${targetAddress} after all attempts failed`);
             return {
               balance: '0',
               token: 'ETH',
               chain: chain.name,
+              error: 'Failed to fetch balance after multiple attempts'
+            };
+          } catch (error) {
+            console.error('Error in getBalance handler:', error);
+
+            // Return a default balance of 0 with error information
+            return {
+              balance: '0',
+              token: 'ETH',
+              chain: chain.name,
+              error: error.message || 'Unknown error fetching balance'
             };
           }
         },
@@ -246,10 +267,10 @@ export function createTransactionAgent({ useTestnet = false, walletAddress, smar
             if (!targetAddress) {
               throw new Error('Wallet address is required to fetch transaction history');
             }
-            
+
             // In a real implementation, we would query an API or blockchain for the transaction history
             // For now, we'll check the database
-            
+
             try {
               // Fetch transaction history from the API
               const response = await fetch(`/api/transactions/history?walletAddress=${targetAddress}&limit=${limit}`, {
@@ -258,13 +279,13 @@ export function createTransactionAgent({ useTestnet = false, walletAddress, smar
                   'Content-Type': 'application/json'
                 }
               });
-              
+
               if (!response.ok) {
                 throw new Error(`Failed to fetch transaction history: ${response.statusText}`);
               }
-              
+
               const history = await response.json();
-              
+
               return {
                 transactions: history.transactions || [],
                 count: history.count || 0,
@@ -340,8 +361,17 @@ export function isTransactionRequest(message) {
   const hasHistoryKeyword = historyKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasTokenKeyword = tokenKeywords.some(keyword => lowerMessage.includes(keyword));
 
+  // Special case for balance check
+  if (lowerMessage.includes('balance') ||
+      (lowerMessage.includes('check') && !lowerMessage.includes('check out')) ||
+      lowerMessage.includes('how much') ||
+      lowerMessage.includes('show balance')) {
+    console.log('Transaction request detected: Balance check');
+    return true;
+  }
+
   // Return true if the message contains at least one transaction-related keyword
-  return hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword || 
+  return hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword ||
          (hasTokenKeyword && (hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword));
 }
 
@@ -364,12 +394,15 @@ export async function extractTransactionDetails(message) {
   let splitType = null;
 
   // Check for check balance intent
-  if (lowerMessage.includes('balance') || 
-      lowerMessage.includes('check') || 
+  if (lowerMessage.includes('balance') ||
+      lowerMessage.includes('check') ||
       lowerMessage.includes('how much') ||
       lowerMessage.includes('show balance')) {
+      console.log('Detected balance check request');
       return {
         type: 'check_balance',
+        intent: 'check_balance',
+        action: 'check_balance',
         amount: null,
         token: 'ETH',  // Always use ETH
         recipients: []
@@ -377,9 +410,9 @@ export async function extractTransactionDetails(message) {
     }
 
   // Check for transaction history intent
-  if (lowerMessage.includes('history') || 
-      lowerMessage.includes('transactions') || 
-      lowerMessage.includes('recent') && 
+  if (lowerMessage.includes('history') ||
+      lowerMessage.includes('transactions') ||
+      lowerMessage.includes('recent') &&
       lowerMessage.includes('transaction')) {
       return {
         type: 'transaction_history',
@@ -393,7 +426,7 @@ export async function extractTransactionDetails(message) {
     type = 'send';
   } else if (lowerMessage.includes('split') || lowerMessage.includes('divide') || lowerMessage.includes('share')) {
     type = 'split';
-    
+
     // Extract split type
     if (lowerMessage.includes('equal') || lowerMessage.includes('equally') || lowerMessage.includes('even') || lowerMessage.includes('evenly')) {
       splitType = 'equal';
@@ -408,7 +441,7 @@ export async function extractTransactionDetails(message) {
   const amountMatch = message.match(/\b(\d+(\.\d+)?)\s*(eth|ether|usdc|dai|usd)?\b/i);
   if (amountMatch) {
     amount = parseFloat(amountMatch[1]);
-    
+
     // Extract token if specified, but ALWAYS default to ETH regardless of what's specified
     token = 'ETH';
   }

@@ -337,7 +337,7 @@ export const createConversation = async (walletAddress, title) => {
     // This bypasses RLS policies by using the service role key
     try {
       console.log(`Creating conversation via server API for wallet ${normalizedAddress}`);
-      
+
       const response = await fetch('/api/conversations/create', {
         method: 'POST',
         headers: {
@@ -359,10 +359,10 @@ export const createConversation = async (walletAddress, title) => {
       return data.conversationId;
     } catch (apiError) {
       console.error('Error calling conversation create API:', apiError);
-      
+
       // Try the fallback approach using RPC function
       console.log('Trying fallback approach with RPC function');
-      
+
       // Call the create_conversation RPC function
       const { data, error } = await supabase.rpc('create_conversation', {
         p_wallet_address: normalizedAddress,
@@ -449,14 +449,34 @@ export const updateConversationTitle = async (conversationId, title) => {
  */
 export const addMessageToConversation = async (conversationId, userId, message, isUser, metadata = null) => {
   try {
+    console.log('Adding message to conversation:', {
+      conversationId,
+      userId,
+      messageLength: message?.length,
+      isUser,
+      hasMetadata: !!metadata
+    });
+
     if (!conversationId || !userId || !message) {
       console.error('Missing required parameters for addMessageToConversation')
       return null
     }
 
+    // Ensure conversationId is a number
+    const numericConversationId = typeof conversationId === 'string'
+      ? parseInt(conversationId, 10)
+      : conversationId;
+
+    if (isNaN(numericConversationId)) {
+      console.error('Invalid conversationId:', conversationId);
+      return null;
+    }
+
+    console.log('Using numeric conversation ID:', numericConversationId);
+
     // Call the add_message_to_conversation RPC function
     const { data, error } = await supabase.rpc('add_message_to_conversation', {
-      p_conversation_id: conversationId,
+      p_conversation_id: numericConversationId,
       p_user_id: userId,
       p_message: message,
       p_is_user: isUser,
@@ -464,6 +484,8 @@ export const addMessageToConversation = async (conversationId, userId, message, 
     })
 
     if (error) {
+      console.error('Error in add_message_to_conversation RPC:', error);
+
       // Check if this is a "function not found" error, which can happen if the function was just created
       if (error.message && error.message.includes('function not found')) {
         console.error('Function add_message_to_conversation not found. It may need to be created in the database.')
@@ -474,7 +496,7 @@ export const addMessageToConversation = async (conversationId, userId, message, 
             .from('chat_history')
             .insert({
               user_id: userId,
-              conversation_id: conversationId,
+              conversation_id: numericConversationId,
               message: message,
               is_user: isUser,
               created_at: new Date().toISOString(),
@@ -492,7 +514,7 @@ export const addMessageToConversation = async (conversationId, userId, message, 
           await supabase
             .from('chat_conversations')
             .update({ updated_at: new Date().toISOString() })
-            .eq('id', conversationId);
+            .eq('id', numericConversationId);
 
           return newMessage?.id || null
         } catch (fallbackError) {

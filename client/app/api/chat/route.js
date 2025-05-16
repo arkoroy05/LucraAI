@@ -378,6 +378,49 @@ async function generateAIResponse(parsedData, walletAddress) {
 
           if (!user) {
             console.log(`User not found in database: ${walletAddress}`);
+
+            // Try to create the user
+            try {
+              const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/users/ensure`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  walletAddress: walletAddress,
+                  walletType: 'wagmi'
+                })
+              });
+
+              if (!response.ok) {
+                console.error('Error ensuring user exists:', await response.text());
+              } else {
+                const result = await response.json();
+                console.log('User created or found:', result);
+
+                // Use the created/found user to store messages
+                if (result.user && result.user.id) {
+                  // Log this balance check to chat history
+                  const { error: historyError } = await supabaseServer
+                    .from('chat_history')
+                    .insert([
+                      {
+                        user_id: result.user.id,
+                        message: 'Balance check request',
+                        is_user: false,
+                        created_at: new Date().toISOString(),
+                        metadata: { action: 'check_balance', token: 'ETH', intent: 'check_balance' }
+                      }
+                    ]);
+
+                  if (historyError) {
+                    console.error('Error logging balance check to history:', historyError);
+                  }
+                }
+              }
+            } catch (ensureError) {
+              console.error('Error creating user:', ensureError);
+            }
           } else {
             try {
               // Log this balance check to chat history
@@ -389,7 +432,7 @@ async function generateAIResponse(parsedData, walletAddress) {
                     message: 'Balance check request',
                     is_user: false,
                     created_at: new Date().toISOString(),
-                    metadata: { action: 'check_balance', token: 'ETH' }
+                    metadata: { action: 'check_balance', token: 'ETH', intent: 'check_balance' }
                   }
                 ]);
 
@@ -404,6 +447,9 @@ async function generateAIResponse(parsedData, walletAddress) {
           console.error('Error handling user in check_balance:', error);
         }
       }
+      // Log that we're returning a balance check response
+      console.log('Returning balance check response with parsedData:', parsedData);
+
       return `🤖 __FETCH_BALANCE__`;
 
     case 'transaction_history':
@@ -590,6 +636,96 @@ export async function POST(req) {
             }
           } else {
             console.log('User not found in database:', walletAddress);
+
+            // Try to create the user
+            try {
+              const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/users/ensure`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  walletAddress: walletAddress,
+                  walletType: 'wagmi'
+                })
+              });
+
+              if (!response.ok) {
+                console.error('Error ensuring user exists:', await response.text());
+              } else {
+                const result = await response.json();
+                console.log('User created or found:', result);
+
+                // Use the created/found user to store messages
+                if (result.user && result.user.id) {
+                  // Store the user message
+                  const messageData = {
+                    user_id: result.user.id,
+                    message: lastUserMessage.content,
+                    is_user: true,
+                    created_at: new Date().toISOString()
+                  };
+
+                  if (conversationId) {
+                    messageData.conversation_id = conversationId;
+                  }
+
+                  await supabaseServer
+                    .from('chat_history')
+                    .insert([messageData]);
+
+                  // Store the AI response
+                  const aiResponseData = {
+                    user_id: result.user.id,
+                    message: aiResponse,
+                    is_user: false,
+                    created_at: new Date().toISOString(),
+                    metadata: parsedData.intent === 'send' || parsedData.intent === 'split' ? { transaction: parsedData } : null
+                  };
+
+                  if (conversationId) {
+                    aiResponseData.conversation_id = conversationId;
+                  }
+
+                  await supabaseServer
+                    .from('chat_history')
+                    .insert([aiResponseData]);
+
+                  // If this is a transaction, store it in the transactions table
+                  if (parsedData.intent === 'send' || parsedData.intent === 'split') {
+                    await supabaseServer
+                      .from('transactions')
+                      .insert([
+                        {
+                          user_id: result.user.id,
+                          transaction_hash: null,
+                          transaction_type: parsedData.intent,
+                          amount: parsedData.amount || 0,
+                          token: parsedData.token || 'ETH',
+                          recipient_address: parsedData.recipients && parsedData.recipients.length > 0
+                            ? parsedData.recipients[0]
+                            : 'unknown',
+                          status: 'pending',
+                          note: parsedData.note || '',
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString(),
+                          metadata: parsedData
+                        }
+                      ]);
+                  }
+
+                  // Update conversation's updated_at timestamp if we have a conversation ID
+                  if (conversationId) {
+                    await supabaseServer
+                      .from('chat_conversations')
+                      .update({ updated_at: new Date().toISOString() })
+                      .eq('id', conversationId);
+                  }
+                }
+              }
+            } catch (ensureError) {
+              console.error('Error creating user:', ensureError);
+            }
           }
         } catch (dbError) {
           console.error('Error storing message in database:', dbError);
@@ -601,6 +737,9 @@ export async function POST(req) {
       // For text-based responses (non-streaming), we need to return plain text
       // This is compatible with streamProtocol: 'text' in the client
       console.log('Sending response text:', aiResponse);
+
+      // Log the parsed data we're sending in the header
+      console.log('Sending response with parsed data in header:', parsedData);
 
       // Create a simple text response
       return new Response(aiResponse, {
@@ -680,6 +819,9 @@ export async function POST(req) {
           // Continue with the response even if database storage fails
         }
       }
+
+      // Log the fallback data we're sending in the header
+      console.log('Sending fallback response with parsed data in header:', fallbackData);
 
       return new Response(fallbackResponse, {
         headers: {

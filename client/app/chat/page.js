@@ -67,8 +67,13 @@ export default function ChatInterface() {
     nativeDisplayBalance,
     balances,
     refreshBalances,
-    isLoading: isBalanceLoading
+    isLoading: isWalletBalanceLoading,
+    isAgentLoading,
+    isRefreshing
   } = useWalletBalance()
+
+  // Combined loading state for balance
+  const isBalanceLoading = isWalletBalanceLoading || isAgentLoading || isRefreshing;
 
   // Ref to track if we've already refreshed balances
   const hasRefreshedRef = useRef(false);
@@ -113,10 +118,16 @@ export default function ChatInterface() {
   useEffect(() => {
     if (conversationId && isConnected && address) {
       // Set the current conversation ID
-      setCurrentConversationId(parseInt(conversationId))
+      const numericConversationId = parseInt(conversationId, 10);
+      if (!isNaN(numericConversationId)) {
+        console.log('Setting current conversation ID:', numericConversationId);
+        setCurrentConversationId(numericConversationId);
+      } else {
+        console.error('Invalid conversation ID:', conversationId);
+      }
 
       // Load conversation messages
-      getConversationMessages(parseInt(conversationId))
+      getConversationMessages(numericConversationId)
         .then(messages => {
           if (messages && messages.length > 0) {
             // Set conversation title
@@ -180,12 +191,30 @@ export default function ChatInterface() {
       if (response.ok) {
         console.log('Chat response received');
 
+        // Log all headers for debugging
+        const headers = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+        console.log('Response headers:', headers);
+
         // Get the parsed data from the custom header
         const parsedDataHeader = response.headers.get('X-Parsed-Data');
         if (parsedDataHeader) {
           try {
             const parsedData = JSON.parse(parsedDataHeader);
             console.log('Parsed data from header:', parsedData);
+
+            // Check if this is a balance check request
+            if (parsedData.intent === 'check_balance' || parsedData.action === 'check_balance' || parsedData.type === 'check_balance') {
+              console.log('Balance check request detected in response header, refreshing balance');
+              // Refresh the balance immediately
+              refreshBalances().then(() => {
+                console.log('Balance refreshed from response handler');
+              }).catch(err => {
+                console.error('Error refreshing balance:', err);
+              });
+            }
 
             // Store the parsed data to be used in the UI
             // We'll attach it to the last message when it's complete
@@ -202,6 +231,63 @@ export default function ChatInterface() {
       // This is called when the API response is complete
       console.log('Message finished:', message);
 
+      // Check if this is a balance check request
+      if (message.content === '__FETCH_BALANCE__' || (message.content && message.content.includes && message.content.includes('__FETCH_BALANCE__'))) {
+        console.log('Balance check message detected in onFinish, refreshing balance');
+
+        // Find the message element and update it to show loading state
+        const messageEl = document.querySelector(`[data-message-id="${message.id}"]`);
+        if (messageEl) {
+          const messageContent = messageEl.querySelector('.message-content');
+          if (messageContent) {
+            messageContent.innerHTML = `<p>Fetching your balance...</p>`;
+          }
+        }
+
+        // Refresh the balance
+        refreshBalances().then(() => {
+          console.log('Balance refreshed from onFinish handler, updating UI with balance:', nativeDisplayBalance);
+
+          // Find the message element and update it with the actual balance
+          setTimeout(() => {
+            const balanceText = isConnected
+              ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`
+              : 'Please connect your wallet to check your balance.';
+
+            // Update the DOM element
+            const messageEl = document.querySelector(`[data-message-id="${message.id}"]`);
+            if (messageEl) {
+              const messageContent = messageEl.querySelector('.message-content');
+              if (messageContent) {
+                messageContent.innerHTML = `<p>${balanceText}</p>`;
+              }
+            }
+
+            // Also update the message object in the messages array
+            const messageIndex = messages.findIndex(m => m.id === message.id);
+            if (messageIndex !== -1) {
+              const updatedMessages = [...messages];
+              updatedMessages[messageIndex] = {
+                ...updatedMessages[messageIndex],
+                content: balanceText
+              };
+              setMessages(updatedMessages);
+            }
+          }, 1000);
+        }).catch(err => {
+          console.error('Error refreshing balance:', err);
+
+          // Show error message
+          const messageEl = document.querySelector(`[data-message-id="${message.id}"]`);
+          if (messageEl) {
+            const messageContent = messageEl.querySelector('.message-content');
+            if (messageContent) {
+              messageContent.innerHTML = `<p>Error fetching balance: ${err.message || 'Unknown error'}</p>`;
+            }
+          }
+        });
+      }
+
       // Attach the parsed data from the header to the message
       if (window.__lastParsedData) {
         // We need to use a different approach to modify the message object
@@ -217,10 +303,22 @@ export default function ChatInterface() {
 
           // Save AI response to conversation if we have a conversation ID
           if (currentConversationId && userId) {
+            // Check if the message is a balance check placeholder
+            const messageContent = message.content === '__FETCH_BALANCE__'
+              ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`
+              : message.content;
+
+            console.log('Saving message to conversation:', {
+              conversationId: currentConversationId,
+              userId,
+              content: messageContent,
+              metadata: window.__lastParsedData
+            });
+
             addMessageToConversation(
               currentConversationId,
               userId,
-              message.content,
+              messageContent,
               false,
               window.__lastParsedData
             ).catch(error => {
@@ -232,12 +330,24 @@ export default function ChatInterface() {
         // Clear the temporary storage
         window.__lastParsedData = null;
       } else if (currentConversationId && userId) {
+        // Check if the message is a balance check placeholder
+        const messageContent = message.content === '__FETCH_BALANCE__'
+          ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`
+          : message.content;
+
+        console.log('Saving message to conversation (no parsed data):', {
+          conversationId: currentConversationId,
+          userId,
+          content: messageContent
+        });
+
         // Save AI response to conversation without parsed data
         addMessageToConversation(
           currentConversationId,
           userId,
-          message.content,
-          false
+          messageContent,
+          false,
+          message.content === '__FETCH_BALANCE__' ? { intent: 'check_balance', token: 'ETH' } : null
         ).catch(error => {
           console.error('Error saving AI message to conversation:', error);
         });
@@ -275,6 +385,52 @@ export default function ChatInterface() {
 
           // If this is an assistant message, check if we need to show transaction UI
           if (el.getAttribute('data-role') === 'assistant') {
+            // Check if this is a balance check request
+            if (parsedData && (parsedData.intent === 'check_balance' || parsedData.action === 'check_balance' || parsedData.type === 'check_balance')) {
+              console.log('Balance check request detected in message update, refreshing balance');
+
+              // Update the message content if it's the balance placeholder
+              const messageContent = el.querySelector('.message-content');
+              if (messageContent && (
+                  messageContent.textContent.includes('__FETCH_BALANCE__') ||
+                  messageContent.innerHTML.includes('__FETCH_BALANCE__')
+                )) {
+                // First show loading state
+                messageContent.innerHTML = `<p>Fetching your balance...</p>`;
+
+                // Refresh the balance
+                refreshBalances().then(() => {
+                  console.log('Balance refreshed from message update handler, balance:', nativeDisplayBalance);
+
+                  // Then update with the actual balance after a short delay
+                  setTimeout(() => {
+                    const balanceText = isConnected
+                      ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`
+                      : 'Please connect your wallet to check your balance.';
+                    messageContent.innerHTML = `<p>${balanceText}</p>`;
+
+                    // Also update the message object if possible
+                    const messageIndex = messages.findIndex(m => m.id === messageId);
+                    if (messageIndex !== -1) {
+                      const updatedMessages = [...messages];
+                      updatedMessages[messageIndex] = {
+                        ...updatedMessages[messageIndex],
+                        content: balanceText
+                      };
+                      setMessages(updatedMessages);
+                    }
+                  }, 1000);
+                }).catch(err => {
+                  console.error('Error refreshing balance:', err);
+
+                  // Show error message
+                  messageContent.innerHTML = `<p>Error fetching balance: ${err.message || 'Unknown error'}</p>`;
+                });
+              }
+
+              return; // Skip the rest of the processing for balance checks
+            }
+
             // Find or create the transaction UI container
             let transactionUI = el.querySelector('.transaction-ui');
             if (!transactionUI) {
@@ -326,7 +482,7 @@ export default function ChatInterface() {
     return () => {
       document.removeEventListener('message-updated', handleMessageUpdate);
     };
-  }, []);
+  }, [isConnected, nativeDisplayBalance, refreshBalances, messages, setMessages]);
 
   // Add event listener for AI transactions
   useEffect(() => {
@@ -830,9 +986,15 @@ export default function ChatInterface() {
                             )}
                           >
                             {message.content === "__FETCH_BALANCE__" && isConnected
-                              ? `Your current balance is ${nativeDisplayBalance}. Would you like to see a breakdown by token?`
+                              ? (isBalanceLoading
+                                ? "Fetching your balance..."
+                                : `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`)
                               : message.content === "__FETCH_BALANCE__" && !isConnected
                               ? "Please connect your wallet to check your balance."
+                              : message.content.includes && message.content.includes("__FETCH_BALANCE__")
+                              ? (isBalanceLoading
+                                ? "Fetching your balance..."
+                                : `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`)
                               : message.content}
 
                             {message.role === "assistant" && (

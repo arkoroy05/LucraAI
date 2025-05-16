@@ -78,10 +78,10 @@ export function useWalletSigning() {
         .maybeSingle()
 
       // If user doesn't exist, create them via the API endpoint
-      if (!userData && !userCheckError) {
+      if (!userData) {
         try {
           console.log('Creating user via API endpoint');
-          const response = await fetch('/api/users/ensure', {
+          const response = await fetch('/api/users/store', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -95,14 +95,33 @@ export function useWalletSigning() {
           if (!response.ok) {
             const errorText = await response.text();
             console.error('Error creating user via API:', errorText);
-            // Continue anyway to store the signature
+            // Try the ensure endpoint as a fallback
+            const ensureResponse = await fetch('/api/users/ensure', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                walletAddress: normalizedAddress,
+                walletType: 'wagmi'
+              })
+            });
+            
+            if (!ensureResponse.ok) {
+              const ensureErrorText = await ensureResponse.text();
+              console.error('Error creating user via ensure API:', ensureErrorText);
+              throw new Error('Failed to create user');
+            } else {
+              const ensureResult = await ensureResponse.json();
+              console.log('User created successfully via ensure endpoint:', ensureResult);
+            }
           } else {
             const result = await response.json();
             console.log('User created successfully:', result);
           }
         } catch (apiError) {
           console.error('Error calling user API:', apiError);
-          // Continue anyway to store the signature
+          throw new Error('Failed to create user');
         }
       }
 
@@ -124,8 +143,14 @@ export function useWalletSigning() {
         throw new Error('Failed to store signature')
       }
 
-      // Update the user record to mark as verified
-      if (userData || !userCheckError) {
+      // Update the user record to mark as verified - try again to get user data if it wasn't found earlier
+      const { data: updatedUserData, error: userDataError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('wallet_address', normalizedAddress)
+        .maybeSingle();
+        
+      if (updatedUserData) {
         const { error: userError } = await supabase
           .from('users')
           .update({
@@ -138,6 +163,8 @@ export function useWalletSigning() {
           console.error('Error updating user verification status:', userError)
           // Don't throw here, as the signature was stored successfully
         }
+      } else {
+        console.error('User still not found after creation attempt:', userDataError)
       }
 
       setIsVerified(true)
