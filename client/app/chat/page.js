@@ -26,9 +26,10 @@ const fadeIn = {
 }
 
 const slideIn = {
-  initial: { x: -300 },
-  animate: { x: 0 },
-  exit: { x: -300 }
+  initial: { x: -300, opacity: 0 },
+  animate: { x: 0, opacity: 1 },
+  exit: { x: -300, opacity: 0 },
+  transition: { type: 'spring', stiffness: 300, damping: 30 }
 }
 
 function useWindowSize() {
@@ -63,6 +64,7 @@ export default function ChatInterface() {
   const [currentConversationId, setCurrentConversationId] = useState(null)
   const [conversationTitle, setConversationTitle] = useState('')
   const [userId, setUserId] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const {
     nativeDisplayBalance,
     balances,
@@ -384,14 +386,99 @@ export default function ChatInterface() {
   })
   const [isRecording, setIsRecording] = useState(false)
   const messagesEndRef = useRef(null)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const { width } = useWindowSize()
   const isMobile = width > 0 && width < 768
 
+  
+
+  // Close sidebar on mobile when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isMobile && sidebarOpen && !event.target.closest('.sidebar')) {
+        setSidebarOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isMobile, sidebarOpen])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  // Render sidebar content
+  const renderSidebarContent = () => {
+    return (
+      <motion.div
+        className="sidebar fixed inset-y-0 left-0 w-72 bg-black/95 border-r border-white/10 p-4 z-50 overflow-y-auto"
+        variants={slideIn}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+      >
+        <div className="flex flex-col h-full">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-white">Menu</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-white/60 hover:text-white"
+              onClick={toggleSidebar}
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+
+          {/* Navigation */}
+          <nav className="space-y-2 mb-6">
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-start gap-2 text-white/60 hover:text-white",
+                activeTab === "chat" && "bg-white/10 text-white"
+              )}
+              onClick={() => setActiveTab("chat")}
+            >
+              <MessageSquare className="h-5 w-5" />
+              Chat
+            </Button>
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-start gap-2 text-white/60 hover:text-white",
+                activeTab === "history" && "bg-white/10 text-white"
+              )}
+              onClick={() => setActiveTab("history")}
+            >
+              <History className="h-5 w-5" />
+              History
+            </Button>
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-start gap-2 text-white/60 hover:text-white",
+                activeTab === "transactions" && "bg-white/10 text-white"
+              )}
+              onClick={() => setActiveTab("transactions")}
+            >
+              <Wallet className="h-5 w-5" />
+              Transactions
+            </Button>
+          </nav>
+
+          {/* Wallet Section */}
+          <div className="mt-auto">
+            <div className="p-4 bg-white/5 rounded-lg">
+              <ConnectWallet />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    )
+  }
 
   // Add event listener for message updates with parsed data
   useEffect(() => {
@@ -868,45 +955,73 @@ export default function ChatInterface() {
       </div>
 
       {/* Sidebar */}
-      {(!isMobile || isSidebarOpen) && (
-        <div
-          className={cn(
-            "fixed inset-y-0 left-0 w-72 transform duration-300 ease-out z-40",
-            "bg-black/20 backdrop-blur-xl border-r border-white/10",
-            "md:translate-x-0 mt-16"
-          )}
-        >
-          <div className="p-6">
-            <div className="space-y-8">
-              <div className="space-y-2">
-                <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Wallet</h3>
-                <AccountInfo />
-                {isWalletConnected && <SmartWalletUI />}
+      <AnimatePresence>
+        {(!isMobile || sidebarOpen) && (
+          <motion.div
+            initial={{ x: -300, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -300, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className={cn(
+              "fixed inset-y-0 left-0 w-72 transform z-50 mt-16",
+              "bg-black/95 backdrop-blur-xl border-r border-white/10"
+            )}
+          >
+            <div className="p-6 h-full flex flex-col">
+              <div className="space-y-8 flex-1 overflow-y-auto">
+                {/* Wallet Section */}
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Wallet</h3>
+                  <AccountInfo />
+                  {isWalletConnected && <SmartWalletUI />}
+                </div>
+
+                {/* Navigation */}
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Navigation</h3>
+                  <nav className="space-y-1">
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-start gap-2 text-white/80 hover:text-white hover:bg-white/5",
+                        activeTab === "chat" && "bg-purple-500/10 text-purple-400"
+                      )}
+                      onClick={() => setActiveTab("chat")}
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      Chat
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-start gap-2 text-white/80 hover:text-white hover:bg-white/5",
+                        activeTab === "history" && "bg-purple-500/10 text-purple-400"
+                      )}
+                      onClick={() => setActiveTab("history")}
+                    >
+                      <History className="h-4 w-4" />
+                      Chat History
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-start gap-2 text-white/80 hover:text-white hover:bg-white/5",
+                        activeTab === "transactions" && "bg-purple-500/10 text-purple-400"
+                      )}
+                      onClick={() => setActiveTab("transactions")}
+                    >
+                      <Wallet className="h-4 w-4" />
+                      Transaction History
+                    </Button>
+                  </nav>
+                </div>
               </div>
-
-              <div className="space-y-2">
-                <h3 className="text-sm font-medium text-white/60 uppercase tracking-wider">Navigation</h3>
-                <div className="space-y-1">
-                  <button
-                    className={`w-full p-3 text-left text-sm ${activeTab === 'chat' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
-                    onClick={() => setActiveTab('chat')}
-                  >
-                    Chat
-                  </button>
-
-                  <button
-                    className={`w-full p-3 text-left text-sm ${activeTab === 'history' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
-                    onClick={() => setActiveTab('history')}
-                  >
-                    Chat History
-                  </button>
-
-                  <button
-                    className={`w-full p-3 text-left text-sm ${activeTab === 'transactions' ? 'text-purple-400 bg-purple-500/10' : 'text-white/80 hover:text-white hover:bg-white/5'} rounded-lg transition-colors`}
-                    onClick={() => setActiveTab('transactions')}
-                  >
-                    Transaction History
-                  </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
                   <button
                     className="w-full p-3 text-left text-sm text-white/80 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
@@ -920,7 +1035,6 @@ export default function ChatInterface() {
         </div>
       )}
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col md:ml-72 mt-16 relative z-10">
         {/* Content container */}
         <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full p-6">
