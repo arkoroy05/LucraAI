@@ -303,13 +303,11 @@ export function SmartWalletUI() {
                   {isAgentLoading ? (
                     <span className="text-white/40">Loading...</span>
                   ) : (
-                    <span className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-purple-400">
-                        {agentBalances?.ETH
-                            ? `${parseFloat(agentBalances.ETH).toFixed(1)} ETH`
-                            : '0.0 ETH'}
-                      </span>
-                      <button
+                    <span>{agentBalances?.ETH || '0.00'} ETH</span>
+                  )}
+                </div>
+                <motion.div whileHover={{ scale: 1.05 }}>
+                  <Button
                     size="sm"
                     onClick={() => handleShowFundingUI(selectedWallet.address)}
                     className="bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 gap-1"
@@ -317,10 +315,8 @@ export function SmartWalletUI() {
                   >
                     Fund
                     <ArrowUpDown className="h-3 w-3" />
-                  </button>
-                    </span>
-                  )}
-                </div>
+                  </Button>
+                </motion.div>
               </div>
             </div>
           )}
