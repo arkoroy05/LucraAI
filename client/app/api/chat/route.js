@@ -447,10 +447,33 @@ async function generateAIResponse(parsedData, walletAddress) {
           console.error('Error handling user in check_balance:', error);
         }
       }
-      // Log that we're returning a balance check response
-      console.log('Returning balance check response with parsedData:', parsedData);
+      // Check if we need to specify a wallet type
+      let walletType = 'both';
 
-      return `🤖 __FETCH_BALANCE__`;
+      // Get the raw message from parsedData to check for wallet type
+      const rawMessage = parsedData.raw_message || '';
+      const messageLower = rawMessage.toLowerCase();
+
+      // Check if the message specifically mentions smart wallet
+      if (messageLower.includes('smart wallet') ||
+          messageLower.includes('smart account') ||
+          messageLower.includes('agent wallet')) {
+        walletType = 'smart';
+      }
+      // Check if the message specifically mentions main wallet or connected wallet
+      else if (messageLower.includes('main wallet') ||
+               messageLower.includes('connected wallet') ||
+               messageLower.includes('my wallet')) {
+        walletType = 'main';
+      }
+
+      // Log that we're returning a balance check response
+      console.log('Returning balance check response with parsedData:', {
+        ...parsedData,
+        walletType
+      });
+
+      return `🤖 __FETCH_BALANCE__:${walletType}__`;
 
     case 'transaction_history':
     case 'chat_history':

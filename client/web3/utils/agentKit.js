@@ -345,13 +345,35 @@ export async function processTransactionRequest({ message, useTestnet = false, w
 export function isTransactionRequest(message) {
   if (!message || typeof message !== 'string') return false;
 
-  const lowerMessage = message.toLowerCase();
+  const lowerMessage = message.toLowerCase().trim();
+
+  // Exclude common conversational patterns that might contain transaction keywords
+  const conversationalPatterns = [
+    /^tell me about/i,
+    /^what is/i,
+    /^who is/i,
+    /^how do/i,
+    /^explain/i,
+    /^describe/i,
+    /yourself/i,
+    /technical/i,
+    /standpoint/i,
+    /^hi\b/i,
+    /^hello\b/i,
+    /^hey\b/i
+  ];
+
+  // If the message matches any conversational pattern, it's not a transaction request
+  if (conversationalPatterns.some(pattern => pattern.test(lowerMessage))) {
+    console.log('Message matches conversational pattern, not a transaction request');
+    return false;
+  }
 
   // Check for transaction-related keywords
   const sendKeywords = ['send', 'transfer', 'pay', 'payment'];
   const splitKeywords = ['split', 'divide', 'share'];
-  const checkKeywords = ['check', 'balance', 'show balance', 'how much'];
-  const historyKeywords = ['history', 'transaction', 'transactions', 'recent'];
+  const checkKeywords = ['check balance', 'show balance', 'wallet balance', 'my balance'];
+  const historyKeywords = ['transaction history', 'payment history', 'recent transactions'];
   const tokenKeywords = ['eth', 'ether', 'usdc', 'dai', 'crypto', 'token', 'coin'];
 
   // Check if the message contains transaction-related keywords
@@ -361,18 +383,19 @@ export function isTransactionRequest(message) {
   const hasHistoryKeyword = historyKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasTokenKeyword = tokenKeywords.some(keyword => lowerMessage.includes(keyword));
 
-  // Special case for balance check
-  if (lowerMessage.includes('balance') ||
-      (lowerMessage.includes('check') && !lowerMessage.includes('check out')) ||
-      lowerMessage.includes('how much') ||
+  // Special case for balance check - be more specific to avoid false positives
+  if ((lowerMessage.includes('balance') && (lowerMessage.includes('wallet') || lowerMessage.includes('my'))) ||
+      (lowerMessage.includes('check') && lowerMessage.includes('balance')) ||
+      (lowerMessage.includes('how much') && (lowerMessage.includes('eth') || lowerMessage.includes('token') || lowerMessage.includes('have'))) ||
       lowerMessage.includes('show balance')) {
     console.log('Transaction request detected: Balance check');
     return true;
   }
 
-  // Return true if the message contains at least one transaction-related keyword
-  return hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword ||
-         (hasTokenKeyword && (hasSendKeyword || hasSplitKeyword || hasCheckKeyword || hasHistoryKeyword));
+  // Return true if the message contains specific transaction-related keyword combinations
+  return (hasSendKeyword && (hasTokenKeyword || lowerMessage.includes('to @'))) ||
+         (hasSplitKeyword && (hasTokenKeyword || lowerMessage.includes('between'))) ||
+         (hasHistoryKeyword);
 }
 
 /**
@@ -393,10 +416,10 @@ export async function extractTransactionDetails(message) {
   let recipients = [];
   let splitType = null;
 
-  // Check for check balance intent
-  if (lowerMessage.includes('balance') ||
-      lowerMessage.includes('check') ||
-      lowerMessage.includes('how much') ||
+  // Check for check balance intent - be more specific to avoid false positives
+  if ((lowerMessage.includes('balance') && (lowerMessage.includes('wallet') || lowerMessage.includes('my'))) ||
+      (lowerMessage.includes('check') && lowerMessage.includes('balance')) ||
+      (lowerMessage.includes('how much') && (lowerMessage.includes('eth') || lowerMessage.includes('token') || lowerMessage.includes('have'))) ||
       lowerMessage.includes('show balance')) {
       console.log('Detected balance check request');
       return {

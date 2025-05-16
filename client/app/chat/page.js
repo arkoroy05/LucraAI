@@ -232,29 +232,52 @@ export default function ChatInterface() {
       console.log('Message finished:', message);
 
       // Check if this is a balance check request
-      if (message.content === '__FETCH_BALANCE__' || (message.content && message.content.includes && message.content.includes('__FETCH_BALANCE__'))) {
+      if (message.content && message.content.includes && message.content.includes('__FETCH_BALANCE__')) {
         console.log('Balance check message detected in onFinish, refreshing balance');
+
+        // Extract wallet type if specified
+        let walletType = 'both';
+        const walletTypeMatch = message.content.match(/__FETCH_BALANCE__:(\w+)__/);
+        if (walletTypeMatch && walletTypeMatch[1]) {
+          walletType = walletTypeMatch[1];
+        }
+
+        console.log(`Balance check for wallet type: ${walletType}`);
 
         // Find the message element and update it to show loading state
         const messageEl = document.querySelector(`[data-message-id="${message.id}"]`);
         if (messageEl) {
           const messageContent = messageEl.querySelector('.message-content');
           if (messageContent) {
-            messageContent.innerHTML = `<p>Fetching your balance...</p>`;
+            messageContent.innerHTML = `<p>Fetching your ${walletType === 'smart' ? 'smart wallet' : walletType === 'main' ? 'main wallet' : 'wallet'} balance...</p>`;
           }
         }
 
-        // Refresh the balance
-        refreshBalances().then(() => {
-          console.log('Balance refreshed from onFinish handler, updating UI with balance:', nativeDisplayBalance);
+        // Refresh the balance with the specified wallet type
+        refreshBalances(true, walletType).then((result) => {
+          console.log('Balance refreshed from onFinish handler, result:', result);
 
-          // Find the message element and update it with the actual balance
+          // Determine which balance to display based on wallet type
+          let displayBalance = nativeDisplayBalance || '0 ETH';
+
+          // Get smart wallet balance if available and requested
+          const smartWalletBalance = result?.balances?.agent?.balance || '0';
+
+          // Generate appropriate balance text based on wallet type
+          let balanceText = '';
+          if (!isConnected) {
+            balanceText = 'Please connect your wallet to check your balance.';
+          } else if (walletType === 'smart') {
+            balanceText = `Your smart wallet balance is ${smartWalletBalance} ETH.`;
+          } else if (walletType === 'main') {
+            balanceText = `Your main wallet balance is ${displayBalance}.`;
+          } else {
+            // Both wallets
+            balanceText = `Your main wallet balance is ${displayBalance}. Your smart wallet balance is ${smartWalletBalance} ETH.`;
+          }
+
+          // Update the DOM element
           setTimeout(() => {
-            const balanceText = isConnected
-              ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`
-              : 'Please connect your wallet to check your balance.';
-
-            // Update the DOM element
             const messageEl = document.querySelector(`[data-message-id="${message.id}"]`);
             if (messageEl) {
               const messageContent = messageEl.querySelector('.message-content');
@@ -395,18 +418,44 @@ export default function ChatInterface() {
                   messageContent.textContent.includes('__FETCH_BALANCE__') ||
                   messageContent.innerHTML.includes('__FETCH_BALANCE__')
                 )) {
+
+                // Extract wallet type if specified
+                let walletType = parsedData.walletType || 'both';
+                const walletTypeMatch = messageContent.innerHTML.match(/__FETCH_BALANCE__:(\w+)__/);
+                if (walletTypeMatch && walletTypeMatch[1]) {
+                  walletType = walletTypeMatch[1];
+                }
+
+                console.log(`Balance check for wallet type: ${walletType}`);
+
                 // First show loading state
-                messageContent.innerHTML = `<p>Fetching your balance...</p>`;
+                messageContent.innerHTML = `<p>Fetching your ${walletType === 'smart' ? 'smart wallet' : walletType === 'main' ? 'main wallet' : 'wallet'} balance...</p>`;
 
-                // Refresh the balance
-                refreshBalances().then(() => {
-                  console.log('Balance refreshed from message update handler, balance:', nativeDisplayBalance);
+                // Refresh the balance with the specified wallet type
+                refreshBalances(true, walletType).then((result) => {
+                  console.log('Balance refreshed from message update handler, result:', result);
 
-                  // Then update with the actual balance after a short delay
+                  // Determine which balance to display based on wallet type
+                  let displayBalance = nativeDisplayBalance || '0 ETH';
+
+                  // Get smart wallet balance if available and requested
+                  const smartWalletBalance = result?.balances?.agent?.balance || '0';
+
+                  // Generate appropriate balance text based on wallet type
+                  let balanceText = '';
+                  if (!isConnected) {
+                    balanceText = 'Please connect your wallet to check your balance.';
+                  } else if (walletType === 'smart') {
+                    balanceText = `Your smart wallet balance is ${smartWalletBalance} ETH.`;
+                  } else if (walletType === 'main') {
+                    balanceText = `Your main wallet balance is ${displayBalance}.`;
+                  } else {
+                    // Both wallets
+                    balanceText = `Your main wallet balance is ${displayBalance}. Your smart wallet balance is ${smartWalletBalance} ETH.`;
+                  }
+
+                  // Update the message content
                   setTimeout(() => {
-                    const balanceText = isConnected
-                      ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`
-                      : 'Please connect your wallet to check your balance.';
                     messageContent.innerHTML = `<p>${balanceText}</p>`;
 
                     // Also update the message object if possible
@@ -431,16 +480,17 @@ export default function ChatInterface() {
               return; // Skip the rest of the processing for balance checks
             }
 
-            // Find or create the transaction UI container
-            let transactionUI = el.querySelector('.transaction-ui');
-            if (!transactionUI) {
-              transactionUI = document.createElement('div');
-              transactionUI.className = 'transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10';
-              el.querySelector('.message-content').appendChild(transactionUI);
-            }
-
-            // Update the transaction UI based on the parsed data
+            // Only add transaction UI for actual transaction requests
             if (parsedData && (parsedData.intent === 'send' || parsedData.intent === 'split')) {
+              // Find or create the transaction UI container
+              let transactionUI = el.querySelector('.transaction-ui');
+              if (!transactionUI) {
+                transactionUI = document.createElement('div');
+                transactionUI.className = 'transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10';
+                el.querySelector('.message-content').appendChild(transactionUI);
+              }
+
+              // Update the transaction UI
               transactionUI.innerHTML = `
                 <div class="flex justify-between items-center mb-2">
                   <span class="text-white/60">
@@ -985,50 +1035,26 @@ export default function ChatInterface() {
                                 : "bg-white/10 text-white/90 backdrop-blur-sm border border-white/10"
                             )}
                           >
-                            {message.content === "__FETCH_BALANCE__" && isConnected
-                              ? (isBalanceLoading
-                                ? "Fetching your balance..."
-                                : `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`)
-                              : message.content === "__FETCH_BALANCE__" && !isConnected
-                              ? "Please connect your wallet to check your balance."
-                              : message.content.includes && message.content.includes("__FETCH_BALANCE__")
-                              ? (isBalanceLoading
-                                ? "Fetching your balance..."
-                                : `Your current balance is ${nativeDisplayBalance || '0 ETH'}. Would you like to see a breakdown by token?`)
+                            {message.content && message.content.includes && message.content.includes("__FETCH_BALANCE__")
+                              ? (isWalletBalanceLoading || isAgentLoading || isRefreshing
+                                ? "Fetching your wallet balance..."
+                                : message.content.match(/__FETCH_BALANCE__:(\w+)__/)
+                                  ? (() => {
+                                      const walletType = message.content.match(/__FETCH_BALANCE__:(\w+)__/)[1];
+                                      if (!isConnected) return "Please connect your wallet to check your balance.";
+                                      if (walletType === 'smart') return `Your smart wallet balance is loading...`;
+                                      if (walletType === 'main') return `Your main wallet balance is ${nativeDisplayBalance}.`;
+                                      return `Your main wallet balance is ${nativeDisplayBalance}. Smart wallet balance is loading...`;
+                                    })()
+                                  : `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`)
                               : message.content}
 
-                            {message.role === "assistant" && (
+                            {message.role === "assistant" &&
                               message.parsedData && message.parsedData.intent &&
-                              (message.parsedData.intent === "send" || message.parsedData.intent === "split") ? (
+                              (message.parsedData.intent === "send" || message.parsedData.intent === "split") && (
                                 <TransactionUI parsedData={message.parsedData} transactionId={message.id} />
-                              ) : (
-                                message.content && message.content.includes && message.content.includes("transaction") && (
-                                  <div
-                                    className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui"
-                                  >
-                                    <div className="flex justify-between items-center mb-2">
-                                      <span className="text-white/60">Transaction</span>
-                                      <span
-                                        className="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full"
-                                      >
-                                        Pending
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-white font-medium">ETH to recipient</span>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="text-purple-400 hover:text-purple-300 gap-1"
-                                      >
-                                        View
-                                        <ArrowUpRight className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )
                               )
-                            )}
+                            }
                           </div>
                         </div>
                       </div>
