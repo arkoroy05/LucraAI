@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Send, Mic, Wallet, ArrowUpRight, Menu, History } from "lucide-react"
+import { Send, Mic, Wallet, ArrowUpRight, Menu, History, X, MessageSquare, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Avatar } from "@/components/ui/avatar"
@@ -390,7 +390,7 @@ export default function ChatInterface() {
   const { width } = useWindowSize()
   const isMobile = width > 0 && width < 768
 
-  
+
 
   // Close sidebar on mobile when clicking outside
   useEffect(() => {
@@ -756,7 +756,7 @@ export default function ChatInterface() {
   }
 
   const toggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen)
+    setSidebarOpen(!sidebarOpen)
   }
 
   // Handle suggestion click
@@ -964,7 +964,7 @@ export default function ChatInterface() {
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className={cn(
               "fixed inset-y-0 left-0 w-72 transform z-50 mt-16",
-              "bg-black/95 backdrop-blur-xl border-r border-white/10"
+              "bg-[#0F0118] backdrop-blur-xl border-r border-white/10"
             )}
           >
             <div className="p-6 h-full flex flex-col">
@@ -1015,6 +1015,14 @@ export default function ChatInterface() {
                       <Wallet className="h-4 w-4" />
                       Transaction History
                     </Button>
+
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start gap-2 text-white/80 hover:text-white hover:bg-white/5 mt-4"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Settings
+                    </Button>
                   </nav>
                 </div>
               </div>
@@ -1023,17 +1031,7 @@ export default function ChatInterface() {
         )}
       </AnimatePresence>
 
-                  <button
-                    className="w-full p-3 text-left text-sm text-white/80 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                  >
-                    Settings
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       <div className="flex-1 flex flex-col md:ml-72 mt-16 relative z-10">
         {/* Content container */}
