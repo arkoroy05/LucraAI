@@ -9,6 +9,9 @@ import { base, baseSepolia } from 'viem/chains';
 import { resolveBaseName } from './baseNameResolver';
 import { BASE_MAINNET, BASE_SEPOLIA } from '../config/networks';
 
+// Re-export resolveBaseName directly to avoid import issues
+export { resolveBaseName } from './baseNameResolver';
+
 // Create public clients for Base Mainnet and Sepolia
 const baseClient = createPublicClient({
   chain: base,

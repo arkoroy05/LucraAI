@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createTransactionAgent, resolveBaseName } from '../../../../../web3/utils/agentKit';
+import { createTransactionAgent } from '../../../../../web3/utils/agentKit';
+import { resolveBaseName } from '../../../../../web3/utils/baseNameResolver';
+import { lookupBaseName as lookupBaseNameService } from '@/web3/utils/baseNameService';
+import { isAddress } from 'viem';
 import supabaseServer from '@/utils/supabase-server';
 
 /**
@@ -45,8 +48,45 @@ export async function POST(req) {
 
     // Execute the transaction based on its type
     if (transaction.type === 'send') {
-      // Resolve the recipient address if it's a Base Name
-      const resolvedRecipient = await resolveBaseName(transaction.recipient, useTestnet);
+      // Check if the recipient is an address with a basename format (0xname.base.eth)
+      let resolvedRecipient;
+      const recipient = transaction.recipient;
+
+      // Handle the case where the recipient looks like an address but has a .base or .eth suffix
+      if (recipient.startsWith('0x') && (recipient.includes('.base') || recipient.includes('.eth'))) {
+        console.log(`Recipient appears to be an address with basename format: ${recipient}`);
+
+        // Extract the address part (everything before the first dot)
+        const addressPart = recipient.split('.')[0];
+
+        if (isAddress(addressPart)) {
+          console.log(`Valid address found in recipient: ${addressPart}`);
+          resolvedRecipient = addressPart;
+
+          // Log a warning about the format
+          console.warn(`Recipient was in format "0xaddress.base.eth". Using address part: ${resolvedRecipient}`);
+        } else {
+          // If it's not a valid address, try to resolve it as a basename
+          resolvedRecipient = await resolveBaseName(recipient, useTestnet);
+        }
+      } else if (isAddress(recipient)) {
+        // If it's already a valid address, use it directly
+        resolvedRecipient = recipient;
+
+        // Try to lookup the basename for this address (for informational purposes)
+        try {
+          // Always use mainnet for basename lookups
+          const basename = await lookupBaseNameService(recipient);
+          if (basename) {
+            console.log(`Found basename for ${recipient}: ${basename}`);
+          }
+        } catch (lookupError) {
+          console.warn(`Failed to lookup basename for address ${recipient}:`, lookupError);
+        }
+      } else {
+        // Otherwise, try to resolve it as a basename
+        resolvedRecipient = await resolveBaseName(recipient, useTestnet);
+      }
 
       if (!resolvedRecipient) {
         return NextResponse.json(
@@ -109,9 +149,23 @@ export async function POST(req) {
         },
       });
     } else if (transaction.type === 'split') {
-      // Resolve all recipient addresses
+      // Resolve all recipient addresses with the same logic as above
       const resolvedRecipients = await Promise.all(
         transaction.recipients.map(async (recipient) => {
+          // Handle the case where the recipient looks like an address but has a .base or .eth suffix
+          if (recipient.startsWith('0x') && (recipient.includes('.base') || recipient.includes('.eth'))) {
+            console.log(`Split recipient appears to be an address with basename format: ${recipient}`);
+
+            // Extract the address part (everything before the first dot)
+            const addressPart = recipient.split('.')[0];
+
+            if (isAddress(addressPart)) {
+              console.log(`Valid address found in split recipient: ${addressPart}`);
+              return addressPart;
+            }
+          }
+
+          // Otherwise try to resolve as a basename or use directly if it's an address
           const resolved = await resolveBaseName(recipient, useTestnet);
           return resolved || null;
         })

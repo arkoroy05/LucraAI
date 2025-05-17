@@ -157,13 +157,28 @@ export default function ChatInterface() {
         .then(messages => {
           if (messages && messages.length > 0) {
             // Convert to the format expected by useChat
-            const formattedMessages = messages.map(msg => ({
-              id: msg.id.toString(),
-              role: msg.is_user ? 'user' : 'assistant',
-              content: msg.message,
-              createdAt: new Date(msg.created_at),
-              metadata: msg.metadata
-            }))
+            const formattedMessages = messages.map(msg => {
+              let parsedData = msg.metadata || undefined;
+              // Normalize parsedData: if it exists but is missing intent, try to infer
+              if (parsedData && !parsedData.intent) {
+                // Try to infer intent from content or structure
+                if (parsedData.type === 'send' || parsedData.type === 'split') {
+                  parsedData.intent = parsedData.type;
+                } else if (msg.content && msg.content.toLowerCase().includes('send')) {
+                  parsedData.intent = 'send';
+                } else if (msg.content && msg.content.toLowerCase().includes('split')) {
+                  parsedData.intent = 'split';
+                }
+              }
+              return {
+                id: msg.id.toString(),
+                role: msg.is_user ? 'user' : 'assistant',
+                content: msg.message,
+                createdAt: new Date(msg.created_at),
+                metadata: msg.metadata,
+                parsedData
+              }
+            })
 
             // Set initial messages
             setInitialMessages(formattedMessages)
@@ -219,8 +234,24 @@ export default function ChatInterface() {
             }
 
             // Store the parsed data to be used in the UI
-            // We'll attach it to the last message when it's complete
             window.__lastParsedData = parsedData;
+            
+            // Attach parsedData to the last message immediately (don't wait for onFinish)
+            // Find the last assistant message in the messages array
+            setTimeout(() => {
+              const lastMessageIndex = messages.length - 1;
+              if (lastMessageIndex >= 0 && messages[lastMessageIndex].role === 'assistant') {
+                console.log('Attaching parsed data to message index:', lastMessageIndex);
+                setMessages(prevMessages => {
+                  const updatedMessages = [...prevMessages];
+                  updatedMessages[lastMessageIndex] = {
+                    ...updatedMessages[lastMessageIndex],
+                    parsedData
+                  };
+                  return updatedMessages;
+                });
+              }
+            }, 500); // Small delay to ensure message is in the array
           } catch (err) {
             console.error('Error parsing X-Parsed-Data header:', err);
           }
@@ -314,65 +345,32 @@ export default function ChatInterface() {
       }
 
       // Attach the parsed data from the header to the message
-      if (window.__lastParsedData) {
-        // We need to use a different approach to modify the message object
-        // since it might be read-only in strict mode
-        setTimeout(() => {
-          // Force a re-render with the updated messages
-          // This is a hack, but it works for our purposes
-          document.dispatchEvent(new CustomEvent('message-updated', {
-            detail: { messageId: message.id, parsedData: window.__lastParsedData }
-          }));
+      if (window.__lastParsedData && message.role === 'assistant') {
+        setMessages(prevMessages => prevMessages.map(m =>
+          m.id === message.id ? { ...m, parsedData: window.__lastParsedData } : m
+        ));
+      }
 
-          console.log('Transaction data attached:', window.__lastParsedData);
-
-          // Save AI response to conversation if we have a conversation ID
-          if (currentConversationId && userId) {
-            // Check if the message is a balance check placeholder
-            const messageContent = message.content === '__FETCH_BALANCE__'
-              ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`
-              : message.content;
-
-            console.log('Saving message to conversation:', {
-              conversationId: currentConversationId,
-              userId,
-              content: messageContent,
-              metadata: window.__lastParsedData
-            });
-
-            addMessageToConversation(
-              currentConversationId,
-              userId,
-              messageContent,
-              false,
-              window.__lastParsedData
-            ).catch(error => {
-              console.error('Error saving AI message to conversation:', error);
-            });
-          }
-        }, 0);
-
-        // Clear the temporary storage
-        window.__lastParsedData = null;
-      } else if (currentConversationId && userId) {
+      // Save AI response to conversation if we have a conversation ID
+      if (currentConversationId && userId) {
         // Check if the message is a balance check placeholder
         const messageContent = message.content === '__FETCH_BALANCE__'
           ? `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`
           : message.content;
 
-        console.log('Saving message to conversation (no parsed data):', {
+        console.log('Saving message to conversation:', {
           conversationId: currentConversationId,
           userId,
-          content: messageContent
+          content: messageContent,
+          metadata: window.__lastParsedData
         });
 
-        // Save AI response to conversation without parsed data
         addMessageToConversation(
           currentConversationId,
           userId,
           messageContent,
           false,
-          message.content === '__FETCH_BALANCE__' ? { intent: 'check_balance', token: 'ETH' } : null
+          window.__lastParsedData
         ).catch(error => {
           console.error('Error saving AI message to conversation:', error);
         });
@@ -479,230 +477,6 @@ export default function ChatInterface() {
       </motion.div>
     )
   }
-
-  // Add event listener for message updates with parsed data
-  useEffect(() => {
-    const handleMessageUpdate = (event) => {
-      const { messageId, parsedData } = event.detail;
-
-      // Find the message in the DOM and update it
-      // This is a workaround since we can't directly modify the messages array
-      const messageElements = document.querySelectorAll(`[data-message-id="${messageId}"]`);
-      if (messageElements.length > 0) {
-        // Store the parsed data as a data attribute
-        messageElements.forEach(el => {
-          el.setAttribute('data-parsed-data', JSON.stringify(parsedData));
-
-          // If this is an assistant message, check if we need to show transaction UI
-          if (el.getAttribute('data-role') === 'assistant') {
-            // Check if this is a balance check request
-            if (parsedData && (parsedData.intent === 'check_balance' || parsedData.action === 'check_balance' || parsedData.type === 'check_balance')) {
-              console.log('Balance check request detected in message update, refreshing balance');
-
-              // Update the message content if it's the balance placeholder
-              const messageContent = el.querySelector('.message-content');
-              if (messageContent && (
-                  messageContent.textContent.includes('__FETCH_BALANCE__') ||
-                  messageContent.innerHTML.includes('__FETCH_BALANCE__')
-                )) {
-
-                // Extract wallet type if specified
-                let walletType = parsedData.walletType || 'both';
-                const walletTypeMatch = messageContent.innerHTML.match(/__FETCH_BALANCE__:(\w+)__/);
-                if (walletTypeMatch && walletTypeMatch[1]) {
-                  walletType = walletTypeMatch[1];
-                }
-
-                console.log(`Balance check for wallet type: ${walletType}`);
-
-                // First show loading state
-                messageContent.innerHTML = `<p>Fetching your ${walletType === 'smart' ? 'smart wallet' : walletType === 'main' ? 'main wallet' : 'wallet'} balance...</p>`;
-
-                // Refresh the balance with the specified wallet type
-                refreshBalances(true, walletType).then((result) => {
-                  console.log('Balance refreshed from message update handler, result:', result);
-
-                  // Determine which balance to display based on wallet type
-                  let displayBalance = nativeDisplayBalance || '0 ETH';
-
-                  // Get smart wallet balance if available and requested
-                  const smartWalletBalance = result?.balances?.agent?.balance || '0';
-
-                  // Generate appropriate balance text based on wallet type
-                  let balanceText = '';
-                  if (!isConnected) {
-                    balanceText = 'Please connect your wallet to check your balance.';
-                  } else if (walletType === 'smart') {
-                    balanceText = `Your smart wallet balance is ${parseFloat(smartWalletBalance).toFixed(2)} ETH.`;
-                  } else if (walletType === 'main') {
-                    balanceText = `Your main wallet balance is ${parseFloat(displayBalance).toFixed(2)}.`;
-                  } else {
-                    // Both wallets - show main wallet first, then smart wallet
-                    balanceText = `Your main wallet balance is ${parseFloat(displayBalance).toFixed(2)}. Your smart wallet balance is ${parseFloat(smartWalletBalance).toFixed(2)} ETH.`;
-                  }
-
-                  // Update the message content
-                  setTimeout(() => {
-                    messageContent.innerHTML = `<p>${balanceText}</p>`;
-
-                    // Also update the message object if possible
-                    const messageIndex = messages.findIndex(m => m.id === messageId);
-                    if (messageIndex !== -1) {
-                      const updatedMessages = [...messages];
-                      updatedMessages[messageIndex] = {
-                        ...updatedMessages[messageIndex],
-                        content: balanceText
-                      };
-                      setMessages(updatedMessages);
-                    }
-                  }, 1000);
-                }).catch(err => {
-                  console.error('Error refreshing balance:', err);
-
-                  // Show error message
-                  messageContent.innerHTML = `<p>Error fetching balance: ${err.message || 'Unknown error'}</p>`;
-                });
-              }
-
-              return; // Skip the rest of the processing for balance checks
-            }
-
-            // Only add transaction UI for actual transaction requests
-            if (parsedData && (parsedData.intent === 'send' || parsedData.intent === 'split')) {
-              // Find or create the transaction UI container
-              let transactionUI = el.querySelector('.transaction-ui');
-              if (!transactionUI) {
-                transactionUI = document.createElement('div');
-                transactionUI.className = 'transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10';
-                el.querySelector('.message-content').appendChild(transactionUI);
-              }
-
-              // Update the transaction UI
-              transactionUI.innerHTML = `
-                <div class="flex justify-between items-center mb-2">
-                  <span class="text-white/60">
-                    ${parsedData.intent === "send" ? "Transaction" : "Split Payment"}
-                  </span>
-                  <span class="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full">
-                    Pending
-                  </span>
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-white font-medium">
-                    ${parsedData.amount} ${parsedData.token || "USDC"} to
-                    ${parsedData.recipients && parsedData.recipients.length > 0
-                      ? parsedData.recipients.map(r => `@${r}`).join(", ")
-                      : "recipient"}
-                    ${parsedData.note ? ` ${parsedData.note}` : ""}
-                  </span>
-                  <div>
-                    <button class="text-purple-400 hover:text-purple-300 gap-1 text-sm px-2 py-1 bg-transparent">
-                      View
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block">
-                        <path d="M7 17L17 7"></path>
-                        <path d="M7 7h10v10"></path>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              `;
-            }
-          }
-        });
-      }
-    };
-
-    // Add the event listener
-    document.addEventListener('message-updated', handleMessageUpdate);
-
-    // Clean up
-    return () => {
-      document.removeEventListener('message-updated', handleMessageUpdate);
-    };
-  }, [isConnected, nativeDisplayBalance, refreshBalances, messages, setMessages]);
-
-  // Add event listener for AI transactions
-  useEffect(() => {
-    const handleAITransaction = (event) => {
-      const { userMessage, aiResponse, transactionDetails } = event.detail;
-
-      // Add the messages to the DOM
-      const chatContainer = document.querySelector('.chat-messages');
-      if (chatContainer) {
-        // Create user message element
-        const userMessageEl = document.createElement('div');
-        userMessageEl.className = 'message user-message mb-6 flex justify-end';
-        userMessageEl.setAttribute('data-message-id', userMessage.id);
-        userMessageEl.setAttribute('data-role', 'user');
-        userMessageEl.innerHTML = `
-          <div class="flex items-start max-w-[80%] gap-4 flex-row-reverse">
-            <div class="h-10 w-10 border border-white/10 ring-2 ring-white/10 bg-purple-500/80 rounded-full flex items-center justify-center">
-              <div class="flex items-center justify-center h-full text-white text-sm font-medium">U</div>
-            </div>
-            <div class="rounded-2xl p-5 text-sm leading-relaxed message-content bg-purple-500/30 text-white backdrop-blur-sm">
-              <p>${userMessage.content}</p>
-            </div>
-          </div>
-        `;
-        chatContainer.appendChild(userMessageEl);
-
-        // Create AI response element
-        const aiMessageEl = document.createElement('div');
-        aiMessageEl.className = 'message ai-message mb-6 flex justify-start';
-        aiMessageEl.setAttribute('data-message-id', aiResponse.id);
-        aiMessageEl.setAttribute('data-role', 'assistant');
-        aiMessageEl.innerHTML = `
-          <div class="flex items-start max-w-[80%] gap-4 flex-row">
-            <div class="h-10 w-10 border border-white/10 ring-2 ring-white/10 bg-white/10 rounded-full flex items-center justify-center">
-              <div class="flex items-center justify-center h-full text-white text-sm font-medium">AI</div>
-            </div>
-            <div class="rounded-2xl p-5 text-sm leading-relaxed message-content bg-white/10 text-white/90 backdrop-blur-sm border border-white/10">
-              <p>${aiResponse.content}</p>
-              <div class="transaction-ui mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
-                <div class="flex justify-between items-center mb-2">
-                  <span class="text-white/60">
-                    ${transactionDetails.type === "send" ? "Transaction" : "Split Payment"}
-                  </span>
-                  <span class="text-purple-400 text-xs font-medium px-2 py-1 bg-purple-400/10 rounded-full">
-                    Processing
-                  </span>
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-white font-medium">
-                    ${transactionDetails.amount} ${transactionDetails.token || "ETH"} to
-                    ${transactionDetails.type === "split"
-                      ? transactionDetails.recipients.map(r => `@${r}`).join(", ")
-                      : `@${transactionDetails.recipient}`}
-                  </span>
-                  <div>
-                    <button class="text-purple-400 hover:text-purple-300 gap-1 text-sm px-2 py-1 bg-transparent">
-                      Execute
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block">
-                        <path d="M7 17L17 7"></path>
-                        <path d="M7 7h10v10"></path>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        `;
-        chatContainer.appendChild(aiMessageEl);
-
-        // Scroll to the bottom
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }
-    };
-
-    // Add the event listener
-    document.addEventListener('ai-transaction', handleAITransaction);
-
-    // Clean up
-    return () => {
-      document.removeEventListener('ai-transaction', handleAITransaction);
-    };
-  }, []);
 
   // Generate suggestions based on input
   useEffect(() => {
@@ -815,26 +589,19 @@ export default function ChatInterface() {
             content: userMessage,
           };
 
-          // Add the AI response to the chat
+          // Add the AI response to the chat, with parsedData for TransactionUI
           const aiResponseObj = {
             id: (Date.now() + 1).toString(),
             role: 'assistant',
             content: result.agentResponse.response || 'Transaction processed successfully.',
+            parsedData: result.details // Attach parsedData for TransactionUI
           };
 
           // Clear the input
           setInput('');
 
           // Update the messages array
-          // Since we can't directly modify the messages array from useChat,
-          // we'll add a custom event to handle this
-          document.dispatchEvent(new CustomEvent('ai-transaction', {
-            detail: {
-              userMessage: userMessageObj,
-              aiResponse: aiResponseObj,
-              transactionDetails: result.details
-            }
-          }));
+          setMessages((prev) => [...prev, userMessageObj, aiResponseObj]);
 
           // Save messages to conversation if we have a conversation ID
           if (currentConversationId && userId) {
@@ -1098,65 +865,75 @@ export default function ChatInterface() {
 
                 {/* Messages */}
                 <div className="flex-1 space-y-6 chat-messages">
-                    {messages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={cn(
-                          "flex",
-                          message.role === "user" ? "justify-end" : "justify-start"
-                        )}
-                        data-message-id={message.id}
-                        data-role={message.role}
-                      >
+                    {messages.map((message) => {
+                      console.log('Rendering message:', message);
+                      return (
                         <div
+                          key={message.id}
                           className={cn(
-                            "flex items-start max-w-[80%] gap-4",
-                            message.role === "user" ? "flex-row-reverse" : "flex-row"
+                            "flex",
+                            message.role === "user" ? "justify-end" : "justify-start"
                           )}
+                          data-message-id={message.id}
+                          data-role={message.role}
                         >
-                          <Avatar
-                            className={cn(
-                              "h-10 w-10 border border-white/10 ring-2 ring-white/10",
-                              message.role === "user" ? "bg-purple-500/80" : "bg-white/10"
-                            )}
-                          >
-                            <div className="flex items-center justify-center h-full text-white text-sm font-medium">
-                              {message.role === "user" ? "U" : "AI"}
-                            </div>
-                          </Avatar>
-
                           <div
                             className={cn(
-                              "rounded-2xl p-5 text-sm leading-relaxed message-content",
-                              message.role === "user"
-                                ? "bg-purple-500/30 text-white backdrop-blur-sm"
-                                : "bg-white/10 text-white/90 backdrop-blur-sm border border-white/10"
+                              "flex items-start max-w-[80%] gap-4",
+                              message.role === "user" ? "flex-row-reverse" : "flex-row"
                             )}
                           >
-                            {message.content && message.content.includes && message.content.includes("__FETCH_BALANCE__")
-                              ? (isWalletBalanceLoading || isAgentLoading || isRefreshing
-                                ? "Fetching your wallet balance..."
-                                : message.content.match(/__FETCH_BALANCE__:(\w+)__/)
-                                  ? (() => {
-                                      const walletType = message.content.match(/__FETCH_BALANCE__:(\w+)__/)[1];
-                                      if (!isConnected) return "Please connect your wallet to check your balance.";
-                                      if (walletType === 'smart') return `Your smart wallet balance is ${balances?.agent?.balance || '0'} ETH.`;
-                                      if (walletType === 'main') return `Your main wallet balance is ${nativeDisplayBalance}.`;
-                                      return `Your main wallet balance is ${nativeDisplayBalance}. Your smart wallet balance is ${balances?.agent?.balance || '0'} ETH.`;
-                                    })()
-                                  : `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`)
-                              : message.content}
+                            <Avatar
+                              className={cn(
+                                "h-10 w-10 border border-white/10 ring-2 ring-white/10",
+                                message.role === "user" ? "bg-purple-500/80" : "bg-white/10"
+                              )}
+                            >
+                              <div className="flex items-center justify-center h-full text-white text-sm font-medium">
+                                {message.role === "user" ? "U" : "AI"}
+                              </div>
+                            </Avatar>
 
-                            {message.role === "assistant" &&
-                              message.parsedData && message.parsedData.intent &&
-                              (message.parsedData.intent === "send" || message.parsedData.intent === "split") && (
-                                <TransactionUI parsedData={message.parsedData} transactionId={message.id} />
-                              )
-                            }
+                            <div
+                              className={cn(
+                                "rounded-2xl p-5 text-sm leading-relaxed message-content",
+                                message.role === "user"
+                                  ? "bg-purple-500/30 text-white backdrop-blur-sm"
+                                  : "bg-white/10 text-white/90 backdrop-blur-sm border border-white/10"
+                              )}
+                            >
+                              {message.content && message.content.includes && message.content.includes("__FETCH_BALANCE__")
+                                ? (isWalletBalanceLoading || isAgentLoading || isRefreshing
+                                  ? "Fetching your wallet balance..."
+                                  : message.content.match(/__FETCH_BALANCE__:(\w+)__/)
+                                    ? (() => {
+                                        const walletType = message.content.match(/__FETCH_BALANCE__:(\w+)__/)[1];
+                                        if (!isConnected) return "Please connect your wallet to check your balance.";
+                                        if (walletType === 'smart') return `Your smart wallet balance is ${balances?.agent?.balance || '0'} ETH.`;
+                                        if (walletType === 'main') return `Your main wallet balance is ${nativeDisplayBalance}.`;
+                                        return `Your main wallet balance is ${nativeDisplayBalance}. Your smart wallet balance is ${balances?.agent?.balance || '0'} ETH.`;
+                                      })()
+                                    : `Your current balance is ${nativeDisplayBalance || '0 ETH'}.`)
+                                : message.content}
+
+                              {message.role === "assistant" &&
+                                message.parsedData && (
+                                  (message.parsedData.intent && 
+                                    (message.parsedData.intent === "send" || message.parsedData.intent === "split")) ||
+                                  (message.parsedData.type && 
+                                    (message.parsedData.type === "send" || message.parsedData.type === "split"))
+                                ) && (
+                                  <TransactionUI 
+                                    parsedData={message.parsedData} 
+                                    transactionId={message.id} 
+                                  />
+                                )
+                              }
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
                 <div ref={messagesEndRef} />
 

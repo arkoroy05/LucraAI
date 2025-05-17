@@ -6,7 +6,8 @@ import { formatAddressOrName } from '../utils/baseNameResolver'
 import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, Check, AlertCircle } from 'lucide-react'
-import { useAccount } from 'wagmi'
+import { useAccount, useChainId } from 'wagmi'
+import { getNetworkByChainId, BASE_SEPOLIA } from '../config/networks'
 
 /**
  * TransactionUI component that handles transaction execution and status display
@@ -15,7 +16,10 @@ import { useAccount } from 'wagmi'
 export function TransactionUI({ parsedData = {}, transactionId }) {
   const [isExecuting, setIsExecuting] = useState(false)
   const [isUpdatingDb, setIsUpdatingDb] = useState(false)
+  const [executionError, setExecutionError] = useState(null)
   const { address } = useAccount()
+  const chainId = useChainId()
+
   // Get transaction functions and state
   const transactions = useTransactions()
   const {
@@ -28,6 +32,10 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
     getExplorerUrl,
     network
   } = transactions
+
+  // Determine if we're using the testnet
+  const currentNetwork = getNetworkByChainId(chainId)
+  const useTestnet = currentNetwork?.id === BASE_SEPOLIA.id
 
   // Update transaction status in Supabase when transaction status changes
   useEffect(() => {
@@ -73,62 +81,109 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
   }, [hash, isPending, isConfirming, isConfirmed, address, isExecuting, transactionId, isUpdatingDb])
 
   // Execute the transaction based on the parsed data
-  const executeTransaction = () => {
+  const executeTransaction = async () => {
     setIsExecuting(true)
+    setExecutionError(null)
 
     try {
+      // Prepare transaction data based on the intent/type
+      let transactionData = null
+
       if (parsedData.intent === 'send' || parsedData.type === 'send') {
         // For send intent, use the first recipient
         const recipient = parsedData.recipients && parsedData.recipients.length > 0
           ? parsedData.recipients[0]
           : (parsedData.recipient || null)
 
-        if (recipient && parsedData.amount) {
-          // Check if the recipient is a Base Name or an address
-          const isBaseName = !recipient.startsWith('0x') && (recipient.includes('.base') || recipient.includes('.eth'))
+        if (!recipient || !parsedData.amount) {
+          throw new Error('Missing recipient or amount for send transaction')
+        }
 
-          // If it's a Base Name, use it directly, otherwise prepend 0x if needed
-          const formattedRecipient = isBaseName ? recipient : (recipient.startsWith('0x') ? recipient : `0x${recipient}`)
+        // Check if the recipient is a Base Name or an address
+        const isBaseName = !recipient.startsWith('0x') && (recipient.includes('.base') || recipient.includes('.eth'))
 
-          console.log(`Executing transaction to ${formattedRecipient}`)
+        // If it's a Base Name, use it directly, otherwise prepend 0x if needed
+        const formattedRecipient = isBaseName ? recipient : (recipient.startsWith('0x') ? recipient : `0x${recipient}`)
 
-          sendPayment({
-            to: formattedRecipient,
-            amount: parsedData.amount,
-            token: parsedData.token || 'ETH',
-            note: parsedData.note || ''
-          })
+        console.log(`Preparing transaction to ${formattedRecipient}`)
+
+        transactionData = {
+          type: 'send',
+          recipient: formattedRecipient,
+          amount: parsedData.amount,
+          token: parsedData.token || 'ETH',
+          note: parsedData.note || ''
         }
       } else if (parsedData.intent === 'split' || parsedData.type === 'split') {
         // For split intent, use all recipients
-        if (parsedData.recipients && parsedData.recipients.length > 0 && parsedData.amount) {
-          // Format recipients properly
-          const formattedRecipients = parsedData.recipients.map(name => {
-            const isBaseName = !name.startsWith('0x') && (name.includes('.base') || name.includes('.eth'))
-            return isBaseName ? name : (name.startsWith('0x') ? name : `0x${name}`)
-          })
+        if (!parsedData.recipients || parsedData.recipients.length === 0 || !parsedData.amount) {
+          throw new Error('Missing recipients or amount for split transaction')
+        }
 
-          console.log(`Executing split payment between ${formattedRecipients.join(', ')}`)
+        // Format recipients properly
+        const formattedRecipients = parsedData.recipients.map(name => {
+          const isBaseName = !name.startsWith('0x') && (name.includes('.base') || name.includes('.eth'))
+          return isBaseName ? name : (name.startsWith('0x') ? name : `0x${name}`)
+        })
 
-          splitPayment(
-            formattedRecipients,
-            parsedData.amount,
-            parsedData.token || 'ETH',
-            parsedData.note || ''
-          )
+        console.log(`Preparing split payment between ${formattedRecipients.join(', ')}`)
+
+        transactionData = {
+          type: 'split',
+          recipients: formattedRecipients,
+          amount: parsedData.amount,
+          token: parsedData.token || 'ETH',
+          note: parsedData.note || ''
         }
       } else if (parsedData.intent === 'check_balance' || parsedData.type === 'check_balance') {
         // For balance check, we don't need to execute a transaction
         console.log('Balance check requested, no transaction needed')
         setIsExecuting(false)
+        return
       } else if (parsedData.intent === 'transaction_history' || parsedData.type === 'transaction_history') {
         // For transaction history, we don't need to execute a transaction
         console.log('Transaction history requested, no transaction needed')
         setIsExecuting(false)
+        return
       }
+
+      if (!transactionData) {
+        throw new Error('Could not prepare transaction data')
+      }
+
+      // Call the execute-transaction API endpoint
+      console.log('Calling execute-transaction API with data:', transactionData);
+      const response = await fetch('/api/ai/execute-transaction', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          transaction: transactionData,
+          walletAddress: address,
+          useTestnet
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to execute transaction');
+      }
+
+      const result = await response.json();
+      console.log('Transaction execution result:', result);
+
+      // If we're here, the transaction was successfully submitted
+      // The actual blockchain confirmation will be handled by the useEffect above
+      // that watches for hash, isPending, etc.
+
+      // For now, we'll use the wagmi hooks for transaction status
+      // but we could also implement a polling mechanism to check the status
+      // of the transaction from the API if needed
     } catch (error) {
-      console.error('Transaction error:', error)
-      setIsExecuting(false)
+      console.error('Transaction execution error:', error);
+      setExecutionError(error.message);
+      setIsExecuting(false);
     }
   }
 
@@ -235,6 +290,13 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
             className="h-3 w-3 border-2 border-purple-400 border-t-transparent rounded-full"
           />
           Syncing with database...
+        </div>
+      )}
+
+      {executionError && (
+        <div className="mt-2 text-xs text-red-400 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" />
+          {executionError}
         </div>
       )}
     </div>
