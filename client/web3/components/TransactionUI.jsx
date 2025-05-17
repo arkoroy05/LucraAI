@@ -51,6 +51,8 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
         if (isConfirming) status = 'confirming'
         if (isConfirmed) status = 'completed'
 
+        console.log(`Transaction status update: ${status} for hash ${hash}`)
+
         // Call the API to update the transaction status
         const response = await fetch('/api/transactions/update', {
           method: 'POST',
@@ -77,8 +79,28 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
 
     if (hash && isExecuting) {
       updateTransactionStatus()
+
+      // Set a polling interval to check transaction status
+      const statusInterval = setInterval(updateTransactionStatus, 5000)
+
+      // Clean up interval on unmount or when transaction is confirmed
+      return () => {
+        clearInterval(statusInterval)
+      }
     }
   }, [hash, isPending, isConfirming, isConfirmed, address, isExecuting, transactionId, isUpdatingDb])
+
+  // Automatically open Basescan when transaction is submitted
+  useEffect(() => {
+    if (hash && !window.basescanOpened) {
+      const explorerUrl = getExplorerUrl()
+      if (explorerUrl) {
+        console.log(`Opening transaction in Basescan: ${explorerUrl}`)
+        window.open(explorerUrl, '_blank')
+        window.basescanOpened = true
+      }
+    }
+  }, [hash, getExplorerUrl])
 
   // Execute the transaction based on the parsed data
   const executeTransaction = async () => {
@@ -193,10 +215,18 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
     if (isPending) return 'sending'
     if (isConfirming) return 'confirming'
     if (isConfirmed) return 'confirmed'
+    if (hash && !isPending && !isConfirming && !isConfirmed) return 'processing' // Transaction submitted but not yet picked up by wagmi hooks
     return 'pending'
   }
 
   const status = getTransactionStatus()
+
+  // Reset basescanOpened flag when component unmounts
+  useEffect(() => {
+    return () => {
+      window.basescanOpened = false
+    }
+  }, [])
 
   return (
     <div className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 transaction-ui">
@@ -210,7 +240,7 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
           className={`text-xs font-medium px-2 py-1 rounded-full ${
             status === 'confirmed'
               ? 'bg-green-500/20 text-green-400'
-              : status === 'sending' || status === 'confirming'
+              : status === 'sending' || status === 'confirming' || status === 'processing'
                 ? 'bg-yellow-500/20 text-yellow-400 animate-pulse'
                 : 'bg-purple-400/10 text-purple-400'
           }`}
@@ -224,6 +254,8 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
             'Sending...'
           ) : status === 'confirming' ? (
             'Confirming...'
+          ) : status === 'processing' ? (
+            'Processing...'
           ) : (
             'Pending'
           )}
@@ -278,7 +310,18 @@ export function TransactionUI({ parsedData = {}, transactionId }) {
 
       {hash && (
         <div className="mt-2 text-xs text-white/60 truncate">
-          TX: {hash}
+          TX: <a
+            href={getExplorerUrl()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-purple-400 hover:text-purple-300 hover:underline"
+            onClick={(e) => {
+              e.preventDefault()
+              window.open(getExplorerUrl(), '_blank')
+            }}
+          >
+            {hash}
+          </a>
         </div>
       )}
 
