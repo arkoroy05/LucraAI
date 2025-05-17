@@ -6,11 +6,11 @@
 
 import { formatEther, parseEther, createPublicClient, http } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import { resolveBaseName } from './baseNameResolver';
+import { resolveBaseName } from './baseNameService';
 import { BASE_MAINNET, BASE_SEPOLIA } from '../config/networks';
 
 // Re-export resolveBaseName directly to avoid import issues
-export { resolveBaseName } from './baseNameResolver';
+export { resolveBaseName } from './baseNameService';
 
 // Create public clients for Base Mainnet and Sepolia
 const baseClient = createPublicClient({

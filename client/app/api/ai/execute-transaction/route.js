@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createTransactionAgent } from '@/web3/utils/agentKit';
-import { resolveBaseName } from '@/web3/utils/baseNameResolver';
-import { lookupBaseName as lookupBaseNameService } from '@/web3/utils/baseNameService';
+import { resolveBaseName, lookupBaseName as lookupBaseNameService } from '@/web3/utils/baseNameService';
 import { isAddress } from 'viem';
 import supabaseServer from '@/utils/supabase-server';
 

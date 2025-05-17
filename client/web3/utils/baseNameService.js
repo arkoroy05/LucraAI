@@ -1,4 +1,4 @@
-import { createPublicClient, http, namehash, keccak256, encodePacked, isAddress } from 'viem'
+import { createPublicClient, http, namehash, keccak256, encodePacked, isAddress, stringToHex } from 'viem'
 import { base, mainnet } from 'viem/chains'
 import L2ResolverAbi from '@/abis/L2ResolverAbi'
 
@@ -7,6 +7,9 @@ export const BASENAME_L2_RESOLVER_ADDRESS = "0xC6d566A56A1aFf6508b41f6c90ff13161
 
 // In-memory cache for basename lookups to prevent excessive RPC calls
 const basenameCache = new Map()
+
+// In-memory cache for address lookups to prevent excessive RPC calls
+const addressCache = new Map()
 
 // Create a public client for Base mainnet with retry logic
 const baseClient = createPublicClient({
@@ -155,6 +158,127 @@ export async function getBasenameTextRecord(basename, key) {
   } catch (error) {
     console.error(`Error getting text record ${key} for ${basename}:`, error)
     return null
+  }
+}
+
+/**
+ * Resolves a Base Name to an Ethereum address
+ * @param {string} name - The Base Name to resolve
+ * @param {boolean} useTestnet - Whether to use testnet or mainnet resolution (always uses mainnet)
+ * @returns {Promise<string|null>} - The resolved Ethereum address or null if not found
+ */
+export async function resolveBaseName(name, useTestnet = false) {
+  try {
+    // Handle null or undefined input
+    if (!name) return null;
+
+    // If the input is already an Ethereum address, return it
+    if (isAddress(name)) return name;
+
+    // Ensure name is a string and handle @ prefix
+    name = String(name);
+    if (name.startsWith('@')) {
+      name = name.substring(1);
+    }
+
+    console.log(`Resolving basename: ${name}`);
+
+    // Handle mixed formats like "0xsachindra.base.eth"
+    if (name.startsWith('0x') && (name.includes('.base') || name.includes('.eth'))) {
+      // Try to extract the 0x part as a potential address
+      const addressPart = name.split('.')[0];
+      if (isAddress(addressPart)) {
+        console.log(`Found valid address in name format: ${addressPart}`);
+        return addressPart;
+      } else {
+        // If it starts with 0x but isn't a valid address, it might be a username with 0x prefix
+        // Extract the basename without the .eth suffix if present
+        let baseName = name;
+        if (name.endsWith('.eth')) {
+          // Remove .eth suffix
+          baseName = name.replace(/\.eth$/, '');
+          console.log(`Extracted potential basename from ENS format: ${baseName}`);
+        }
+
+        // Continue with resolution using the extracted basename
+        name = baseName;
+      }
+    }
+
+    // If it's a pure ENS name (ends with .eth) without 0x prefix, we don't support it yet
+    if (name.endsWith('.eth') && !name.startsWith('0x')) {
+      console.warn(`Pure ENS names not supported yet: ${name}`);
+      return null;
+    }
+
+    // Add .base suffix if not present
+    if (!name.endsWith('.base')) {
+      name = `${name}.base`;
+    }
+
+    // Check cache first to avoid unnecessary RPC calls
+    if (addressCache.has(name)) {
+      const cachedResult = addressCache.get(name);
+      console.log(`Cache hit for ${name}: ${cachedResult || 'null'}`);
+      return cachedResult;
+    }
+
+    // Always use mainnet for basename resolution
+    console.log(`Looking up address for basename: ${name} (using mainnet)`);
+
+    try {
+      // Calculate the namehash for the name
+      const nameNode = namehash(name);
+
+      // Call the addr function on the resolver
+      const address = await baseClient.readContract({
+        abi: L2ResolverAbi,
+        address: BASENAME_L2_RESOLVER_ADDRESS,
+        functionName: "addr",
+        args: [nameNode],
+      });
+
+      console.log(`Resolved ${name} to ${address || 'null'}`);
+
+      // Cache the result (even if null) to prevent future lookups
+      addressCache.set(name, address);
+
+      return address || null;
+    } catch (error) {
+      // If we hit rate limits, try the fallback client
+      if (error.message && (error.message.includes('rate limit') || error.message.includes('429'))) {
+        console.warn('Rate limit hit, using fallback RPC endpoint');
+        try {
+          const nameNode = namehash(name);
+          const address = await fallbackClient.readContract({
+            abi: L2ResolverAbi,
+            address: BASENAME_L2_RESOLVER_ADDRESS,
+            functionName: "addr",
+            args: [nameNode],
+          });
+
+          console.log(`Fallback resolution for ${name} returned ${address || 'null'}`);
+
+          // Cache the result
+          addressCache.set(name, address);
+
+          return address || null;
+        } catch (fallbackError) {
+          console.error('Fallback resolution also failed:', fallbackError);
+          // Cache a null result to prevent repeated failures
+          addressCache.set(name, null);
+          return null;
+        }
+      }
+
+      console.error('Error resolving Base Name:', error);
+      // Cache a null result to prevent repeated failures
+      addressCache.set(name, null);
+      return null;
+    }
+  } catch (error) {
+    console.error('Unexpected error in resolveBaseName:', error);
+    return null;
   }
 }
 

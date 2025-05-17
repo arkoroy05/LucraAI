@@ -44,7 +44,7 @@ export {
   lookupBaseName,
   isBaseName,
   formatAddressOrName
-} from './utils/baseNameResolver'
+} from './utils/baseNameService'
 
 // Smart Wallet Utilities
 export {

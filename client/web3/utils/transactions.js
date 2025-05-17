@@ -3,7 +3,7 @@
  * This provides functionality for preparing, formatting, and storing transactions
  */
 import { parseEther, formatEther } from 'viem';
-import { resolveBaseName } from './baseNameResolver';
+import { resolveBaseName } from './baseNameService';
 import { BASE_MAINNET, BASE_SEPOLIA, getExplorerUrl } from '../config/networks';
 
 /**
@@ -21,7 +21,7 @@ export async function prepareTransaction({ to, amount, token = 'ETH', network = 
   try {
     // Check if 'to' is a Base Name, and if so, resolve it to an address
     let toAddress = to;
-    
+
     // Ensure 'to' is a string before using string methods
     if (typeof to === 'string' && (to.includes('.base') || to.includes('.eth'))) {
       console.log(`Resolving name: ${to}`);
